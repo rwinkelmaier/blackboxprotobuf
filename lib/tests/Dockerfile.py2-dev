@@ -1,0 +1,12 @@
+# Dockerfile for python2 tests
+# Installs dependencies and expects the `lib/` folder to be mapped to `/app`
+
+FROM python:2.7
+
+WORKDIR /app/lib
+
+RUN apt update && \
+    apt install -y protobuf-compiler
+
+COPY tests/requirements-python2-dev.txt ./
+RUN pip install -r requirements-python2-dev.txt

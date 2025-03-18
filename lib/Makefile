@@ -20,3 +20,11 @@ prepublish:
 	# poetry publish -r test-pypi
 	# poetry config pypi-token.pypi TOKEN
 	# poetry publish
+build_docker_py3:
+	docker build -t bbpb_dev_py3 -f tests/Dockerfile.py3-dev .
+run_docker_py3:
+	docker run -it --rm -v ${PWD}:/app/lib/ bbpb_dev_py3 /bin/bash
+build_docker_py2:
+	docker build -t bbpb_dev_py2 -f tests/Dockerfile.py2-dev .
+run_docker_py2:
+	docker run -it --rm -v ${PWD}:/app/lib/ bbpb_dev_py2 /bin/bash

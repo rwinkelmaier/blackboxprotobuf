@@ -1,0 +1,18 @@
+# Dockerfile for python3 tests
+# Installs dependencies and expects the `lib/` folder to be mapped to `/app`
+
+# Requires python 3.10 for type checking
+FROM python:3.10
+
+WORKDIR /app/lib
+
+RUN apt update && \
+    apt install -y protobuf-compiler && \
+    pip install poetry
+
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --no-root --with dev
+
+#  Could add types-six to dependencies, but I think that would require bumping the main python version
+RUN poetry env use python3 && \
+    poetry run pip install types-six

@@ -46,11 +46,13 @@ import blackboxprotobuf.lib.types.length_delim
 import blackboxprotobuf.lib.types.type_maps
 from blackboxprotobuf.lib.config import default as default_config
 from blackboxprotobuf.lib.exceptions import (
+    BlackboxProtobufException,
     TypedefException,
     EncoderException,
     DecoderException,
 )
 from blackboxprotobuf.lib.typedef import TypeDef
+from blackboxprotobuf.lib import payloads
 
 if six.PY3:
     import typing
@@ -254,6 +256,171 @@ def protobuf_from_json(json_str, message_type, config=None):
         return payloads[0]
     else:
         return payloads
+
+
+def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
+    # type: (bytes, Optional[str | TypeDefDict], Optional[str], Optional[Config]) -> tuple[List[Message], TypeDefDict, str]
+    """Decode a protobuf message which may be wrapped in an additional encoding, such as gRPC or gzip.
+    Args:
+        value: byte buffer containing the raw protobuf payload
+        message_type: Optional type definition used as the base for decoding,
+            which allows field types to be customized. If `buf` contains
+            multiple messages, the same typedef will be used for all messages.
+        encoding: The outer encoding around the protobuf payload. Valid values are:
+            - None: encoder will be guessed through trial and error. Specifying
+                    an encoding should always be preferred when possible.
+            - 'none' - No extra encoding, same will be treated as raw protobuf
+            - 'gzip' - Single protobuf message compressed with gzip
+            - 'grpc' - One or more protobuf messages with a gRPC header.
+                       Compressed gRPC is not supported. Once compression
+                       support is added, it will likely be a variation of
+                       `grpc`, such as `grpc-gzip`.
+        config: Optional `blackboxprotobuf.lib.config.Config` object which can
+                change default decoding behaviors
+    Returns:
+        A tuple containing:
+            - List of decoded protobuf messages. This list will contain only
+                  a single element for `none` and `gzip` encodings, but `grpc`
+                  may product multiple messages.
+            - Type definition for re-encoding the messages
+            - name of the encoding algorithm that was used
+    """
+    if config is None:
+        config = default_config
+
+    if isinstance(buf, bytearray):
+        buf = bytes(buf)
+    buf = six.ensure_binary(buf)
+    if message_type is None:
+        message_type = {}
+    elif isinstance(message_type, six.string_types):
+        if message_type not in config.known_types:
+            message_type = {}
+        else:
+            message_type = config.known_types[message_type]
+
+    if not isinstance(message_type, dict):
+        raise DecoderException(
+            "Decode message received an invalid typedef type. Typedef should be a string with a message name, a dictionary, or None"
+        )
+
+    if encoding is None:
+        decoders = payloads.find_decoders(buf)
+        for decoder in decoders:
+            try:
+                protobuf_datas, encoding = decoder(buf)
+            except BlackboxProtobufException:
+                # Error while decoding wrapper, skip to next alg
+                continue
+            # TODO should have everything return lists instead of single values
+            protobuf_datas = (
+                protobuf_datas if isinstance(protobuf_datas, list) else [protobuf_datas]
+            )
+            try:
+                values = []
+                typedef = TypeDef.from_dict(message_type)
+                for protobuf_data in protobuf_datas:
+                    # If there are multiple messages, we assume they have the same
+                    # message type and reuse the typedef
+                    (
+                        value,
+                        typedef,
+                        _,
+                        _,
+                    ) = blackboxprotobuf.lib.types.length_delim.decode_message(
+                        protobuf_data, config, typedef
+                    )
+                    values.append(value)
+                return values, typedef.to_dict(), encoding
+            except BlackboxProtobufException as exc:
+                # If we hit an error decoding, we have to assume we have the
+                # wrong payload wrapper unless we are already using 'none'
+                if encoding == "none":
+                    six.raise_from(
+                        DecoderException(
+                            "Unable to decode protobuf message with any encoding algorithm"
+                        ),
+                        exc,
+                    )
+                continue
+        # Should not hit this due to the raise on "none" encoding alg
+        raise DecoderException(
+            "Unable to decode protobuf message with any encoding algorithm"
+        )
+    else:
+        protobuf_datas, encoding = payloads.decode_payload(buf, encoding)
+        # TODO would be cleaner to just have decode_payload return a list.
+        protobuf_datas = (
+            protobuf_datas if isinstance(protobuf_datas, list) else [protobuf_datas]
+        )
+        values = []
+        typedef = TypeDef.from_dict(message_type)
+        for protobuf_data in protobuf_datas:
+            # If there are multiple messages, we assume they have the same
+            # message type and reuse the typedef
+            (
+                value,
+                typedef,
+                _,
+                _,
+            ) = blackboxprotobuf.lib.types.length_delim.decode_message(
+                protobuf_data, config, typedef
+            )
+            values.append(value)
+
+        return values, typedef.to_dict(), encoding
+
+
+def encode_wrapped_message(messages, message_type, encoding, config=None):
+    # type: (List[Message], str | TypeDefDict, str, Optional[Config]) -> bytes
+    """This function re-encodes one or more messages using the provided
+    typedef and outer encoding algorithm, such as grpc or gzip.
+
+    Args:
+        messages - List with one or more decoded protobuf messages.
+        message_type - Type definition for re-encoding the message. Should
+          generatlly be the type definition returned by a decoding function.
+        encoding - String representing the outer encoding algorithm. This
+          should generally be the value returned by `decode_wrapped_message`.
+          Valid values are:
+            - 'none' - Raw protobuf message, no outer encoding
+            - 'gzip' - gzip compressed message
+            - 'grpc' - One or more protobuf messages encoded with a gRPC
+                       header. gRPC compression is not currently supported.
+
+    Returns:
+        A bytearray containing the encoded protobuf message.
+    """
+    if config is None:
+        config = default_config
+
+    if message_type is None:
+        raise EncoderException(
+            "Encode message must have valid type definition. message_type cannot be None"
+        )
+
+    if isinstance(message_type, six.string_types):
+        if message_type not in config.known_types:
+            raise EncoderException(
+                "The provided message type name (%s) is not known. Encoding requires a valid type definition"
+                % message_type
+            )
+        message_type = config.known_types[message_type]
+
+    if not isinstance(message_type, dict):
+        raise EncoderException(
+            "Encode message received an invalid typedef type. Typedef should be a string with a message name or a dictionary."
+        )
+    typedef = TypeDef.from_dict(message_type)
+    values = []
+
+    for message in messages:
+        value = blackboxprotobuf.lib.types.length_delim.encode_message(
+            message, config, typedef
+        )
+        values.append(value)
+    wrapped_payload = payloads.encode_payload(values, encoding)
+    return wrapped_payload
 
 
 def export_protofile(message_types, output_filename):

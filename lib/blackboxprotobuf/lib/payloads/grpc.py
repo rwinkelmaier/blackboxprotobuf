@@ -51,7 +51,7 @@ def is_grpc(payload):
 
 
 def decode_grpc(payload):
-    # type: (bytes) -> Tuple[bytes | list[bytes], str]
+    # type: (bytes) -> Tuple[list[bytes], str]
     """Decode GRPC. Return the protobuf data"""
     if six.PY2 and isinstance(payload, bytearray):
         payload = bytes(payload)
@@ -93,10 +93,7 @@ def decode_grpc(payload):
             "Error decoding GRPC. Payload length does not match encoded gRPC lengths"
         )
 
-    if len(payloads) > 1:
-        return payloads, "grpc"
-    else:
-        return payloads[0], "grpc"
+    return payloads, "grpc"
 
 
 def encode_grpc(data, encoding="grpc"):

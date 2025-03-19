@@ -35,13 +35,19 @@ if six.PY3:
 # to decode as a protobuf. This should minimize the chance of a false positive
 # on any decoders
 def find_decoders(buf):
-    # type: (bytes) -> List[Callable[[bytes], Tuple[bytes | list[bytes], str]]]
+    # type: (bytes) -> List[Callable[[bytes], Tuple[list[bytes], str]]]
     # In the future, we can take into account content-type too, such as for
     # grpc, but we risk false negatives
-    decoders = []  # type: List[Callable[[bytes], Tuple[bytes | list[bytes], str]]]
+    decoders = []  # type: List[Callable[[bytes], Tuple[list[bytes], str]]]
 
     if gzip.is_gzip(buf):
-        decoders.append(gzip.decode_gzip)
+
+        def decode_gzip_list(buf):
+            # type: (bytes) -> Tuple[list[bytes], str]
+            value, encoding = gzip.decode_gzip(buf)
+            return [value], encoding
+
+        decoders.append(decode_gzip_list)
 
     if grpc.is_grpc(buf):
         decoders.append(grpc.decode_grpc)
@@ -51,22 +57,23 @@ def find_decoders(buf):
 
 
 def _none_decoder(buf):
-    # type: (bytes) -> Tuple[bytes, str]
-    return buf, "none"
+    # type: (bytes) -> Tuple[list[bytes], str]
+    return [buf], "none"
 
 
 # Decoder by name
 def decode_payload(buf, decoder):
-    # type: (bytes, Optional[str]) -> Tuple[bytes | list[bytes], str]
+    # type: (bytes, Optional[str]) -> Tuple[list[bytes], str]
     if decoder is None:
-        return buf, "none"
+        return [buf], "none"
     decoder = decoder.lower()
     if decoder == "none":
-        return buf, "none"
+        return [buf], "none"
     elif decoder.startswith("grpc"):
         return grpc.decode_grpc(buf)
     elif decoder == "gzip":
-        return gzip.decode_gzip(buf)
+        payload, encoding = gzip.decode_gzip(buf)
+        return [payload], encoding
     else:
         raise BlackboxProtobufException("Unknown decoder: " + decoder)
 

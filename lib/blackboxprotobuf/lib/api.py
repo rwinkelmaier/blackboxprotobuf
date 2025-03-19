@@ -263,10 +263,6 @@ def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
             except BlackboxProtobufException:
                 # Error while decoding wrapper, skip to next alg
                 continue
-            # TODO should have everything return lists instead of single values
-            protobuf_datas = (
-                protobuf_datas if isinstance(protobuf_datas, list) else [protobuf_datas]
-            )
             try:
                 values = []
                 # Don't override typedef
@@ -301,10 +297,6 @@ def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
         )
     else:
         protobuf_datas, encoding = payloads.decode_payload(buf, encoding)
-        # TODO would be cleaner to just have decode_payload return a list.
-        protobuf_datas = (
-            protobuf_datas if isinstance(protobuf_datas, list) else [protobuf_datas]
-        )
         values = []
         for protobuf_data in protobuf_datas:
             # If there are multiple messages, we assume they have the same

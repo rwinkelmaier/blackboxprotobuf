@@ -353,7 +353,7 @@ def encode_wrapped_message(messages, message_type, encoding, config=None):
         value = blackboxprotobuf.lib.types.length_delim.encode_message(
             message, config, typedef
         )
-        values.append(value)
+        values.append(bytes(value))
     wrapped_payload = payloads.encode_payload(values, encoding)
     return wrapped_payload
 

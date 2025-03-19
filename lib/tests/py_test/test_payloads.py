@@ -23,7 +23,9 @@ import hypothesis.strategies as st
 import strategies
 import pytest
 
+import blackboxprotobuf
 from blackboxprotobuf.lib import payloads
+from blackboxprotobuf.lib.config import Config
 from blackboxprotobuf.lib.payloads import grpc, gzip
 from blackboxprotobuf.lib.exceptions import BlackboxProtobufException
 
@@ -119,3 +121,36 @@ def test_find_payload_inverse(data, alg):
     assert "none" in valid_decoders
     assert alg in valid_decoders
     assert valid_decoders[alg] == data
+
+
+@given(
+    x=strategies.gen_message(anon=True),
+    chosen_encoding=st.sampled_from(["grpc", "gzip", "none"]),
+)
+def test_wrapped_message(x, chosen_encoding):
+    config = Config()
+
+    original_typedef, message = x
+    protobuf_data = blackboxprotobuf.encode_message(message, original_typedef, config)
+    data = payloads.encode_payload(protobuf_data, chosen_encoding)
+
+    messages, typedef, encoding = blackboxprotobuf.decode_wrapped_message(
+        data, encoding=chosen_encoding, config=config
+    )
+    assert encoding == chosen_encoding
+
+    messages, typedef, encoding = blackboxprotobuf.decode_wrapped_message(
+        data, config=config
+    )
+    assert encoding == chosen_encoding
+
+    payload = blackboxprotobuf.encode_wrapped_message(
+        messages, typedef, encoding, config
+    )
+
+    new_protobuf_data = payloads.decode_payload(payload, chosen_encoding)[0]
+    # can't check against protobuf_data because of field ordering
+    new_message, _ = blackboxprotobuf.decode_message(
+        new_protobuf_data, original_typedef, config
+    )
+    assert message == new_message

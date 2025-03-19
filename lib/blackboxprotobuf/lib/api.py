@@ -65,7 +65,7 @@ if six.PY3:
 
 
 def decode_message(buf, message_type=None, config=None):
-    # type: (bytes, Optional[str | TypeDefDict], Optional[Config]) -> tuple[Message, TypeDefDict]
+    # type: (bytes, Optional[str | TypeDefDict | TypeDef], Optional[Config]) -> tuple[Message, TypeDefDict]
     """Decode a protobuf message and return a python dictionary representing
     the message.
 
@@ -94,26 +94,16 @@ def decode_message(buf, message_type=None, config=None):
     if isinstance(buf, bytearray):
         buf = bytes(buf)
     buf = six.ensure_binary(buf)
-    if message_type is None:
-        message_type = {}
-    elif isinstance(message_type, six.string_types):
-        if message_type not in config.known_types:
-            message_type = {}
-        else:
-            message_type = config.known_types[message_type]
 
-    if not isinstance(message_type, dict):
-        raise DecoderException(
-            "Decode message received an invalid typedef type. Typedef should be a string with a message name, a dictionary, or None"
-        )
+    typedef = _resolve_typedef(message_type, config)
     value, typedef, _, _ = blackboxprotobuf.lib.types.length_delim.decode_message(
-        buf, config, TypeDef.from_dict(message_type)
+        buf, config, typedef
     )
     return value, typedef.to_dict()
 
 
 def encode_message(value, message_type, config=None):
-    # type: (Message, str | TypeDefDict, Optional[Config]) -> bytes
+    # type: (Message, str | TypeDefDict | TypeDef, Optional[Config]) -> bytes
     """Re-encode a python dictionary as a binary protobuf message.
 
     Args:
@@ -133,32 +123,14 @@ def encode_message(value, message_type, config=None):
     if config is None:
         config = default_config
 
-    if message_type is None:
-        raise EncoderException(
-            "Encode message must have valid type definition. message_type cannot be None"
-        )
-
-    if isinstance(message_type, six.string_types):
-        if message_type not in config.known_types:
-            raise EncoderException(
-                "The provided message type name (%s) is not known. Encoding requires a valid type definition"
-                % message_type
-            )
-        message_type = config.known_types[message_type]
-
-    if not isinstance(message_type, dict):
-        raise EncoderException(
-            "Encode message received an invalid typedef type. Typedef should be a string with a message name or a dictionary."
-        )
+    typedef = _resolve_typedef(message_type, config)
     return bytes(
-        blackboxprotobuf.lib.types.length_delim.encode_message(
-            value, config, TypeDef.from_dict(message_type)
-        )
+        blackboxprotobuf.lib.types.length_delim.encode_message(value, config, typedef)
     )
 
 
 def protobuf_to_json(buf, message_type=None, config=None):
-    # type: (bytes | list[bytes], Optional[str | TypeDefDict], Optional[Config]) -> tuple[str, TypeDefDict]
+    # type: (bytes | list[bytes], Optional[str | TypeDefDict | TypeDef], Optional[Config]) -> tuple[str, TypeDefDict]
     """Decode a protobuf messages and return a JSON string representing the
     messages.
 
@@ -183,35 +155,33 @@ def protobuf_to_json(buf, message_type=None, config=None):
         provided, but may add additional fields if new fields were encountered
         during decoding.
     """
+    if config is None:
+        config = default_config
     values = []
     bufs = buf if isinstance(buf, list) else [buf]
 
     if len(bufs) == 0:
         raise DecoderException("No protobuf bytes were provided")
 
+    typedef_dict = _resolve_typedef(message_type, config).to_dict()
+
     for data in bufs:
-        value, message_type = decode_message(data, message_type, config)
-        value = _json_safe_transform(value, message_type, False, config=config)
-        value = _sort_output(value, message_type, config=config)
+        value, typedef_dict = decode_message(data, typedef_dict, config)
+        value = _json_safe_transform(value, typedef_dict, False, config=config)
+        value = _sort_output(value, typedef_dict, config=config)
         values.append(value)
 
-    if not isinstance(message_type, dict):
-        # Shouldn't happen because of len(bufs) check, but make the type checker happy and verify edge cases
-        raise DecoderException(
-            "Error decoding to json: Could not find valid message_type type (dict). Found: %s"
-            % type(message_type)
-        )
-    _annotate_typedef(message_type, values[0])
-    message_type = sort_typedef(message_type)
+    _annotate_typedef(typedef_dict, values[0])
+    typedef_dict = sort_typedef(typedef_dict)
 
     if not isinstance(buf, list) and len(values) == 1:
-        return json.dumps(values[0], indent=2), message_type
+        return json.dumps(values[0], indent=2), typedef_dict
     else:
-        return json.dumps(values, indent=2), message_type
+        return json.dumps(values, indent=2), typedef_dict
 
 
 def protobuf_from_json(json_str, message_type, config=None):
-    # type: (str, str | TypeDefDict, Optional[Config]) -> bytes | list[bytes]
+    # type: (str, str | TypeDefDict | TypeDef, Optional[Config]) -> bytes | list[bytes]
     """Re-encode a JSON string as a binary protobuf message.
 
     Args:
@@ -230,27 +200,18 @@ def protobuf_from_json(json_str, message_type, config=None):
     """
     if config is None:
         config = default_config
-    if isinstance(message_type, six.string_types):
-        if message_type not in config.known_types:
-            raise EncoderException(
-                'protobuf_from_json must have valid type definition. message_type "%s" is not known'
-                % message_type
-            )
-        message_type = config.known_types[message_type]
-    if not isinstance(message_type, dict):
-        raise EncoderException(
-            "Encode message received an invalid typedef type. Typedef should be a string with a message name or a dictionary."
-        )
+
+    typedef = _resolve_typedef(message_type, config)
 
     value = json.loads(json_str)
     values = value if isinstance(value, list) else [value]
 
-    _strip_typedef_annotations(message_type)
-    values = [_json_safe_transform(message, message_type, True) for message in values]
+    typedef_dict = typedef.to_dict()
+    values = [_json_safe_transform(message, typedef_dict, True) for message in values]
 
     payloads = []
     for message in values:
-        payloads.append(encode_message(message, message_type, config))
+        payloads.append(encode_message(message, typedef, config))
 
     if not isinstance(value, list) and len(payloads) == 1:
         return payloads[0]
@@ -259,7 +220,7 @@ def protobuf_from_json(json_str, message_type, config=None):
 
 
 def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
-    # type: (bytes, Optional[str | TypeDefDict], Optional[str], Optional[Config]) -> tuple[List[Message], TypeDefDict, str]
+    # type: (bytes, Optional[str | TypeDefDict | TypeDef], Optional[str], Optional[Config]) -> tuple[List[Message], TypeDefDict, str]
     """Decode a protobuf message which may be wrapped in an additional encoding, such as gRPC or gzip.
     Args:
         value: byte buffer containing the raw protobuf payload
@@ -290,19 +251,9 @@ def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
 
     if isinstance(buf, bytearray):
         buf = bytes(buf)
-    buf = six.ensure_binary(buf)
-    if message_type is None:
-        message_type = {}
-    elif isinstance(message_type, six.string_types):
-        if message_type not in config.known_types:
-            message_type = {}
-        else:
-            message_type = config.known_types[message_type]
 
-    if not isinstance(message_type, dict):
-        raise DecoderException(
-            "Decode message received an invalid typedef type. Typedef should be a string with a message name, a dictionary, or None"
-        )
+    buf = six.ensure_binary(buf)
+    typedef = _resolve_typedef(message_type, config)
 
     if encoding is None:
         decoders = payloads.find_decoders(buf)
@@ -318,20 +269,21 @@ def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
             )
             try:
                 values = []
-                typedef = TypeDef.from_dict(message_type)
+                # Don't override typedef
+                decoder_typedef = typedef
                 for protobuf_data in protobuf_datas:
                     # If there are multiple messages, we assume they have the same
                     # message type and reuse the typedef
                     (
                         value,
-                        typedef,
+                        decoder_typedef,
                         _,
                         _,
                     ) = blackboxprotobuf.lib.types.length_delim.decode_message(
-                        protobuf_data, config, typedef
+                        protobuf_data, config, decoder_typedef
                     )
                     values.append(value)
-                return values, typedef.to_dict(), encoding
+                return values, decoder_typedef.to_dict(), encoding
             except BlackboxProtobufException as exc:
                 # If we hit an error decoding, we have to assume we have the
                 # wrong payload wrapper unless we are already using 'none'
@@ -354,7 +306,6 @@ def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
             protobuf_datas if isinstance(protobuf_datas, list) else [protobuf_datas]
         )
         values = []
-        typedef = TypeDef.from_dict(message_type)
         for protobuf_data in protobuf_datas:
             # If there are multiple messages, we assume they have the same
             # message type and reuse the typedef
@@ -394,24 +345,8 @@ def encode_wrapped_message(messages, message_type, encoding, config=None):
     if config is None:
         config = default_config
 
-    if message_type is None:
-        raise EncoderException(
-            "Encode message must have valid type definition. message_type cannot be None"
-        )
+    typedef = _resolve_typedef(message_type, config)
 
-    if isinstance(message_type, six.string_types):
-        if message_type not in config.known_types:
-            raise EncoderException(
-                "The provided message type name (%s) is not known. Encoding requires a valid type definition"
-                % message_type
-            )
-        message_type = config.known_types[message_type]
-
-    if not isinstance(message_type, dict):
-        raise EncoderException(
-            "Encode message received an invalid typedef type. Typedef should be a string with a message name or a dictionary."
-        )
-    typedef = TypeDef.from_dict(message_type)
     values = []
 
     for message in messages:
@@ -948,3 +883,28 @@ def _strip_typedef_annotations(typedef):
             del field_def["example_value_ignored"]
         if "message_typedef" in field_def:
             _strip_typedef_annotations(field_def["message_typedef"])
+
+
+def _resolve_typedef(message_type, config):
+    # type: (Optional[str | TypeDefDict | TypeDef], Config) -> TypeDef
+    # Takes a message_type which is either None, a dictionary representing a typedef, or a string referencing `Config`, and return the correct typedef
+    # Raises an exception if message_type is str and not in Config
+    # Returns an empty typedef if message_type is None or empty string
+
+    if isinstance(message_type, TypeDef):
+        return message_type
+    elif message_type is None or message_type == "":
+        return TypeDef()
+    elif isinstance(message_type, dict):
+        return TypeDef.from_dict(message_type)
+    elif isinstance(message_type, six.string_types):
+        if message_type in config.known_types:
+            return TypeDef.from_dict(config.known_types[message_type])
+        else:
+            raise BlackboxProtobufException(
+                "message_type (%s) is not in config.known_types" % message_type
+            )
+    else:
+        raise BlackboxProtobufException(
+            "message_type is not a valid type definition: " + message_type
+        )

@@ -80,9 +80,11 @@ def encode_payload(buf, encoder):
     encoder = encoder.lower()
     if encoder == "none":
         if isinstance(buf, list):
-            raise BlackboxProtobufException(
-                "Cannot encode multiple buffers with none/missing encoding"
-            )
+            if len(buf) > 1:
+                raise BlackboxProtobufException(
+                    "Cannot encode multiple buffers with none/missing encoding"
+                )
+            buf = buf[0]
         return buf
     elif encoder.startswith("grpc"):
         return grpc.encode_grpc(buf, encoder)

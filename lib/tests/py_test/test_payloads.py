@@ -33,7 +33,7 @@ from blackboxprotobuf.lib.exceptions import BlackboxProtobufException
 def test_grpc():
     message = bytearray([0x00, 0x00, 0x00, 0x00, 0x01, 0xAA])
     data, encoding = grpc.decode_grpc(message)
-    assert data == bytearray([0xAA])
+    assert data == [bytearray([0xAA])]
     assert encoding == "grpc"
 
     # Compression flag
@@ -59,7 +59,7 @@ def test_grpc():
     # Empty
     message = bytearray([0x00, 0x00, 0x00, 0x00, 0x00])
     data, encoding = grpc.decode_grpc(message)
-    assert len(data) == 0
+    assert len(data[0]) == 0
     assert encoding == "grpc"
 
 
@@ -93,7 +93,7 @@ def test_grpc_inverse(data):
     encoded = grpc.encode_grpc(data)
     decoded, encoding_out = grpc.decode_grpc(encoded)
 
-    assert data == decoded
+    assert data == decoded[0]
     assert encoding == encoding_out
 
 
@@ -115,7 +115,7 @@ def test_find_payload_inverse(data, alg):
     for decoder in decoders:
         try:
             decoded, decoder_alg = decoder(encoded)
-            valid_decoders[decoder_alg] = decoded
+            valid_decoders[decoder_alg] = decoded[0]
         except:
             pass
     assert "none" in valid_decoders
@@ -148,9 +148,9 @@ def test_wrapped_message(x, chosen_encoding):
         messages, typedef, encoding, config
     )
 
-    new_protobuf_data = payloads.decode_payload(payload, chosen_encoding)[0]
+    new_protobuf_data, encoding = payloads.decode_payload(payload, chosen_encoding)
     # can't check against protobuf_data because of field ordering
     new_message, _ = blackboxprotobuf.decode_message(
-        new_protobuf_data, original_typedef, config
+        new_protobuf_data[0], original_typedef, config
     )
     assert message == new_message

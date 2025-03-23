@@ -112,4 +112,4 @@ def encode_grpc(data, encoding="grpc"):
         payload.extend(struct.pack(">I", len(data)))  # Length
         payload.extend(data)
 
-    return payload
+    return bytes(payload)

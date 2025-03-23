@@ -58,3 +58,29 @@ def test_large_multilayer():
 
     encoded = blackboxprotobuf.lib.encode_message(message, typedef, config)
     decoded, _ = blackboxprotobuf.lib.decode_message(encoded, typedef, config)
+
+
+@pytest.mark.skip()
+def test_uint_message_perf():
+    config = blackboxprotobuf.lib.config.Config()
+
+    typedef = {
+        "2": {"type": "int"},
+    }
+
+    message = {"2": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+
+    import timeit
+
+    time_taken = timeit.timeit(
+        lambda: blackboxprotobuf.lib.encode_message(message, typedef, config),
+        number=100000,
+    )
+    print("Encoding took {:.4f} seconds".format(time_taken))
+
+    payload = blackboxprotobuf.lib.encode_message(message, typedef, config)
+    time_taken = timeit.timeit(
+        lambda: blackboxprotobuf.lib.decode_message(payload, typedef, config),
+        number=100000,
+    )
+    print("Decoding took {:.4f} seconds".format(time_taken))

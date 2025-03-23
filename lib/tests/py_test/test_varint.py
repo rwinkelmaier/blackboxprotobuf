@@ -31,12 +31,15 @@ from blackboxprotobuf.lib.exceptions import EncoderException, DecoderException
 
 
 # Test that for any given bytes, we don't alter them when decoding as a varint
-@given(x=st.binary(max_size=10))
+@given(x=st.binary(max_size=11))
 @example(x=b"\x80\x01")
+@example(x=b"\x80\x00")
 @example(x=b"\x80\x81")
 @example(x=b"\x81\x80\x80\x80\x80\x80\x80\x80\x01\x00")
 @example(x=b"\x80\x80\x80\x80\x80\x80\x80\x80\x81\x00")
 @example(x=b"\x80\x80\x80\x80\x80\x80\x80\x80\x81\x80")
+@example(x=b"\x80\x80\x80\x80\x80\x80\x80\x80\x81\x80\x00")
+@example(x=b"\x80\x80\x80\x80\x80\x80\x80\x80\x81\x80\x01")
 def test_varint_idem_uvarint(x):
     try:
         decoded, pos = varint.decode_uvarint(x, 0)
@@ -49,13 +52,15 @@ def test_varint_idem_uvarint(x):
 
 
 # Test that for any given bytes, we don't alter them when decoding as a varint
-@given(x=st.binary(min_size=10, max_size=10))
+@given(x=st.binary(min_size=9, max_size=11))
 @example(x=b"\x80\x01")
 @example(x=b"\x80\x81")
 @example(x=b"\x81\x80\x80\x80\x80\x80\x80\x80\x01\x00")
 @example(x=b"\x80\x80\x80\x80\x80\x80\x80\x80\x81\x00")
 @example(x=b"\x80\x80\x80\x80\x80\x80\x80\x80\x81\x80")
 @example(x=b"\x8d\x9b\xb0\xcc\xcf\xdc\xea\xf4\xf9\x02")
+@example(x=b"\x80\x80\x80\x80\x80\x80\x80\x80\x81\x80\x00")
+@example(x=b"\x80\x80\x80\x80\x80\x80\x80\x80\x81\x80\x01")
 def test_varint_idem_varint(x):
     try:
         decoded, pos = varint.decode_varint(x, 0)
@@ -211,3 +216,43 @@ def test_svarint_decode(x):
     decoded_bbpb, _ = varint.decode_svarint(buf, 0)
 
     assert decoded_google == decoded_bbpb
+
+
+def test_uvarint_bounds():
+    max_uvarint = (1 << 64) - 1
+    max_encoded = varint.encode_uvarint(max_uvarint)
+    max_decoded = varint.decode_uvarint(max_encoded, 0)[0]
+    assert max_decoded == max_uvarint
+
+    with pytest.raises(EncoderException):
+        varint.encode_uvarint(max_uvarint + 1)
+    with pytest.raises(DecoderException):
+        # max_encoded = bytearray(b'\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01')
+        max_encoded = bytearray(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x02")
+        varint.decode_uvarint(max_encoded, 0)[0]
+
+
+def test_varint_bounds():
+    max_varint = (1 << 63) - 1
+    max_encoded = varint.encode_varint(max_varint)
+    max_decoded = varint.decode_varint(max_encoded, 0)[0]
+    assert max_decoded == max_varint
+
+    with pytest.raises(EncoderException):
+        varint.encode_varint(max_varint + 1)
+    with pytest.raises(DecoderException):
+        # max_encoded = bytearray(b'\xff\xff\xff\xff\xff\xff\xff\xff\x7f')
+        max_encoded = bytearray(b"\xff\xff\xff\xff\xff\xff\xff\xff\x80\x02")
+        varint.decode_varint(max_encoded, 0)[0]
+
+    min_varint = -(1 << 63)
+    min_encoded = varint.encode_varint(min_varint)
+    min_decoded = varint.decode_varint(min_encoded, 0)[0]
+    assert min_decoded == min_varint
+
+    with pytest.raises(EncoderException):
+        varint.encode_varint(min_varint - 1)
+    with pytest.raises(DecoderException):
+        # min_encoded = bytearray(b'\x80\x80\x80\x80\x80\x80\x80\x80\x80\x01')
+        min_encoded = bytearray(b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x02")
+        varint.decode_varint(min_encoded, 0)[0]

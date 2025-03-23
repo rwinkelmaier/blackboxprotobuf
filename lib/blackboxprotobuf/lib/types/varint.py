@@ -37,6 +37,8 @@ MIN_UVARINT = 0
 MAX_SVARINT = (1 << 63) - 1
 MIN_SVARINT = -(1 << 63)
 
+MAX_VARINT_LEN = 10
+
 
 def encode_uvarint(value):
     # type: (Any) -> bytearray
@@ -78,10 +80,19 @@ def decode_uvarint(buf, pos):
     try:
         value = 0
         shift = 0
+        max_pos = (
+            pos + MAX_VARINT_LEN
+        )  # max_pos is the next byte after the maximum varint
         while six.indexbytes(buf, pos) & 0x80:
             value += (six.indexbytes(buf, pos) & 0x7F) << (shift * 7)
             pos += 1
             shift += 1
+            # max_pos is the next byte after the max, so fail if we're equal to it
+            if pos >= max_pos:
+                raise DecoderException(
+                    "Error decoding uvarint: length is greater than the maximum bytes: %r"
+                    % buf[pos_start:pos]
+                )
         value += (six.indexbytes(buf, pos) & 0x7F) << (shift * 7)
         pos += 1
     except IndexError:
@@ -89,18 +100,20 @@ def decode_uvarint(buf, pos):
             "Error decoding uvarint: read past the end of the buffer"
         )
 
-    # Validate that this is a cononical encoding by re-encoding the value
-    try:
-        test_encode = encode_uvarint(value)
-    except EncoderException as ex:
+    # The last byte should only be 0x00 if the whole value is 0
+    if value != 0 and six.indexbytes(buf, pos - 1) == 0:
         raise DecoderException(
-            "Error decoding uvarint: value (%s) was not able to be re-encoded: %s"
-            % (value, ex)
+            "Error decoding uvarint: value is not canonical encoding: value: %r - bytes: %r"
+            % (value, buf[pos_start:pos])
         )
-    if buf[pos_start:pos] != test_encode:
+    if value == 0 and pos - pos_start != 1:
         raise DecoderException(
-            "Error decoding uvarint: Encoding is not standard:\noriginal:  %r\nstandard: %r"
-            % (buf[pos_start:pos], test_encode)
+            "Error decoding uvarint: 0 value is not encoded canonically: value: %r - bytes: %r"
+            % (value, buf[pos_start:pos])
+        )
+    if value > MAX_UVARINT:
+        raise DecoderException(
+            "Error decoding uvarint: value (%s) is greater than uvarint max" % value
         )
 
     return (value, pos)
@@ -137,20 +150,6 @@ def decode_varint(buf, pos):
     if value & (1 << 63):
         value -= 1 << 64
 
-    # Validate that this is a cononical encoding by re-encoding the value
-    try:
-        test_encode = encode_varint(value)
-    except EncoderException as ex:
-        raise DecoderException(
-            "Error decoding varint: value (%s) was not able to be re-encoded: %s"
-            % (value, ex)
-        )
-
-    if buf[pos_start:pos] != test_encode:
-        raise DecoderException(
-            "Error decoding varint: Encoding is not standard:\noriginal:  %r\nstandard: %r"
-            % (buf[pos_start:pos], test_encode)
-        )
     return (value, pos)
 
 

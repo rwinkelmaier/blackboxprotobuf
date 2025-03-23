@@ -12,7 +12,7 @@ test_py3:
 format:
 	poetry run black .
 check:
-	poetry run mypy --strict blackboxprotobuf/
+	poetry run mypy --strict --disable-bytearray-promotion blackboxprotobuf/
 prepublish:
 	poetry build
 	poetry config repositories.test-pypi https://test.pypi.org/legacy/

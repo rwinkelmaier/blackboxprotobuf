@@ -39,7 +39,7 @@ MIN_SVARINT = -(1 << 63)
 
 
 def encode_uvarint(value):
-    # type: (Any) -> bytes
+    # type: (Any) -> bytearray
     """Encode a long or int into a bytearray."""
     if not isinstance(value, six.integer_types):
         raise EncoderException("Got non-int type for uvarint encoding: %s" % value)
@@ -107,7 +107,7 @@ def decode_uvarint(buf, pos):
 
 
 def encode_varint(value):
-    # type: (Any) -> bytes
+    # type: (Any) -> bytearray
     """Encode a long or int into a bytearray."""
     if not isinstance(value, six.integer_types):
         raise EncoderException("Got non-int type for varint encoding: %s" % value)
@@ -170,7 +170,7 @@ def decode_zig_zag(value):
 
 
 def encode_svarint(value):
-    # type: (Any) -> bytes
+    # type: (Any) -> bytearray
     """Zigzag encode the potentially signed value prior to encoding"""
     if not isinstance(value, six.integer_types):
         raise EncoderException("Got non-int type for svarint encoding: %s" % value)

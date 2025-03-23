@@ -27,7 +27,7 @@ from blackboxprotobuf.lib.types import varint, fixed, length_delim, wiretypes
 import six
 
 if six.PY3:
-    from typing import Any, Callable, Dict, Tuple
+    from typing import Any, Callable, Dict, Tuple, ByteString
 
 # Map a blackboxprotobuf type to specific encoder
 ENCODERS = {
@@ -52,7 +52,7 @@ ENCODERS = {
     "packed_fixed64": length_delim.generate_packed_encoder(fixed.encode_fixed64),
     "packed_sfixed64": length_delim.generate_packed_encoder(fixed.encode_sfixed64),
     "packed_double": length_delim.generate_packed_encoder(fixed.encode_double),
-}  # type: Dict[str, Callable[[Any], bytes]]
+}  # type: Dict[str, Callable[[Any], ByteString]]
 
 # Map a blackboxprotobuf type to specific decoder
 DECODERS = {

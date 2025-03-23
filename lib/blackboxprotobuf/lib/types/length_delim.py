@@ -46,14 +46,14 @@ if six.PY3:
 
     if typing.TYPE_CHECKING:
         from blackboxprotobuf.lib.config import Config
-        from typing import Any, Callable, Dict, Tuple, Optional, List
+        from typing import Any, Callable, Dict, Tuple, Optional, List, ByteString
         from blackboxprotobuf.lib.pytypes import Message
 
 logger = logging.getLogger(__name__)
 
 
 def encode_string(value):
-    # type: (Any) -> bytes
+    # type: (Any) -> bytearray
     """Encode a string as a length delimited byte array"""
     try:
         value = six.ensure_text(value)
@@ -65,18 +65,17 @@ def encode_string(value):
 
 
 def encode_bytes(value):
-    # type: (Any) -> bytes
+    # type: (Any) -> bytearray
     """Encode a length delimited byte array"""
-    if isinstance(value, bytearray):
-        value = bytes(value)
-    try:
-        value = six.ensure_binary(value)
-    except TypeError as exc:
-        six.raise_from(
-            EncoderException("Error encoding bytes to message: %r" % value), exc
-        )
+    if isinstance(value, six.text_type):
+        try:
+            value = six.ensure_binary(value)
+        except TypeError as exc:
+            six.raise_from(
+                EncoderException("Error encoding bytes to message: %r" % value), exc
+            )
 
-    if not isinstance(value, bytes):
+    if not isinstance(value, (bytes, bytearray)):
         raise EncoderException(
             "encode_bytes must receive a bytes or bytearray value: %s %r"
             % (type(value), value)
@@ -106,7 +105,7 @@ def decode_bytes(buf, pos):
 
 
 def encode_bytes_hex(value):
-    # type: (Any) -> bytes
+    # type: (Any) -> bytearray
     """Encode a length delimited byte array represented by a hex string"""
     try:
         return encode_bytes(binascii.unhexlify(value))
@@ -138,7 +137,7 @@ def decode_string(value, pos):
 
 
 def encode_tag(field_number, wire_type):
-    # type: (int, int) -> bytes
+    # type: (int, int) -> bytearray
     # Not checking bounds here, should be check before
     tag_number = (field_number << 3) | wire_type
     return varint.encode_uvarint(tag_number)
@@ -153,14 +152,14 @@ def decode_tag(buf, pos):
 
 
 def encode_message(data, config, typedef, path=None, field_order=None):
-    # type: (Message, Config, TypeDef, Optional[List[str]], Optional[List[str]]) -> bytes
+    # type: (Message, Config, TypeDef, Optional[List[str]], Optional[List[str]]) -> bytearray
     """Encode a Python dictionary to a binary protobuf message"""
     output = bytearray()
     if path is None:
         path = []
 
     output_len = 0
-    field_outputs = {}  # type: Dict[str, List[bytes]]
+    field_outputs = {}  # type: Dict[str, List[ByteString]]
     for field_id, value in data.items():
         field_number, outputs = _encode_message_field(
             config, typedef, path, field_id, value
@@ -206,7 +205,7 @@ def encode_message(data, config, typedef, path=None, field_order=None):
 
 
 def _encode_message_field(config, typedef, path, field_id, value):
-    # type: (Config, TypeDef, List[str], str | int, Any) -> Tuple[str, List[bytes]]
+    # type: (Config, TypeDef, List[str], str | int, Any) -> Tuple[str, List[ByteString]]
 
     if not isinstance(field_id, six.text_type):
         field_key = six.ensure_text(str(field_id))  # type: str
@@ -234,7 +233,7 @@ def _encode_message_field(config, typedef, path, field_id, value):
             field_path,
         )
 
-    field_encoder = None  # type: Callable[[Any], bytes] | None
+    field_encoder = None  # type: Callable[[Any], ByteString] | None
     if isinstance(field_type, TypeDef):
         field_typedef = field_type
         field_type = "message"
@@ -259,7 +258,7 @@ def _encode_message_field(config, typedef, path, field_id, value):
         int(field_number), blackboxprotobuf.lib.types.WIRETYPES[field_type]
     )
 
-    outputs = []
+    outputs = []  # type: list[ByteString]
     try:
         # Repeated values we'll encode each one separately and add them to the outputs list
         # Packed values take in a list, but encode them into a single length
@@ -629,7 +628,7 @@ def _try_decode_lendelim_fields(buffers, fielddef, config, path):
 
 
 def encode_lendelim_message(data, config, typedef, path=None, field_order=None):
-    # type: (Message, Config, TypeDef, Optional[List[str]], Optional[List[str]]) -> bytes
+    # type: (Message, Config, TypeDef, Optional[List[str]], Optional[List[str]]) -> ByteString
     """Encode data as a length delimited protobuf message"""
     message_out = encode_message(
         data, config, typedef, path=path, field_order=field_order
@@ -649,11 +648,11 @@ def decode_lendelim_message(buf, config, typedef=None, pos=0, depth=0, path=None
 
 
 def generate_packed_encoder(wrapped_encoder):
-    # type: (Callable[[Any], bytes]) -> Callable[[List[Any]], bytes]
+    # type: (Callable[[Any], ByteString]) -> Callable[[List[Any]], bytearray]
     """Generate an encoder for a packed type based on a base type encoder"""
 
     def length_wrapper(values):
-        # type: (List[Any]) -> bytes
+        # type: (List[Any]) -> bytearray
         # Encode repeat values and prefix with the length
         output = bytearray()
         for value in values:

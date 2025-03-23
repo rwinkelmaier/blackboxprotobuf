@@ -898,5 +898,5 @@ def _resolve_typedef(message_type, config):
             )
     else:
         raise BlackboxProtobufException(
-            "message_type is not a valid type definition: " + message_type
+            "message_type is not a valid type definition: %s" % message_type
         )

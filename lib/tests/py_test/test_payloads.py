@@ -147,6 +147,7 @@ def test_wrapped_message(x, chosen_encoding):
     payload = blackboxprotobuf.encode_wrapped_message(
         messages, typedef, encoding, config
     )
+    assert isinstance(payload, bytes)
 
     new_protobuf_data, encoding = payloads.decode_payload(payload, chosen_encoding)
     # can't check against protobuf_data because of field ordering

@@ -124,6 +124,8 @@ def encode_message(value, message_type, config=None):
         config = default_config
 
     typedef = _resolve_typedef(message_type, config)
+    if typedef.is_empty() and len(value) > 0:
+        raise TypedefException("A typedef is required to encoded non-empty messages")
     return bytes(
         blackboxprotobuf.lib.types.length_delim.encode_message(value, config, typedef)
     )
@@ -205,6 +207,8 @@ def protobuf_from_json(json_str, message_type, config=None):
 
     value = json.loads(json_str)
     values = value if isinstance(value, list) else [value]
+    if typedef.is_empty() and any([len(value) > 0 for value in values]):
+        raise TypedefException("A typedef is required to encoded non-empty messages")
 
     typedef_dict = typedef.to_dict()
     values = [_json_safe_transform(message, typedef_dict, True) for message in values]
@@ -338,6 +342,8 @@ def encode_wrapped_message(messages, message_type, encoding, config=None):
         config = default_config
 
     typedef = _resolve_typedef(message_type, config)
+    if typedef.is_empty() and any([len(message) > 0 for message in messages]):
+        raise TypedefException("A typedef is requiredto encode non-empty messages")
 
     values = []
 
@@ -893,10 +899,10 @@ def _resolve_typedef(message_type, config):
         if message_type in config.known_types:
             return TypeDef.from_dict(config.known_types[message_type])
         else:
-            raise BlackboxProtobufException(
+            raise TypedefException(
                 "message_type (%s) is not in config.known_types" % message_type
             )
     else:
-        raise BlackboxProtobufException(
+        raise TypedefException(
             "message_type is not a valid type definition: %s" % message_type
         )

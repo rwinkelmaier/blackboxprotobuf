@@ -83,6 +83,10 @@ class TypeDef(object):
             return field_id, self._fields[field_id]
         return None
 
+    def is_empty(self):
+        # type: (TypeDef) -> bool
+        return len(self._fields) == 0
+
 
 class MutableTypeDef(TypeDef):
     def set_fielddef(self, field_number, fielddef):

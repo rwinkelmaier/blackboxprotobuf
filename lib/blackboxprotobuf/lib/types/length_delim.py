@@ -511,7 +511,6 @@ def _try_decode_lendelim_fields(buf, field_starts, fielddef, config, path):
 
     message_output = {}  # type: Message
 
-    # TODO potential performance improvement: Do a first pass with {} or just group by number and use the results to validate if it's even valid protobuf and quick match wire_types against typedefs
     try:
         outputs_map = {}  # type: Dict[str, Any]
         field_order = []  # type: List[str]

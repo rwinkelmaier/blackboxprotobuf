@@ -23,15 +23,17 @@ import sys
 import six
 import math
 import glob
+import time
 import shutil
 import base64
 import struct
 import pytest
 import logging
 import tempfile
+import importlib
 import subprocess
 import hypothesis
-from hypothesis import given, assume, note, settings, HealthCheck
+from hypothesis import given, assume, note, settings, HealthCheck, reproduce_failure
 import hypothesis.strategies as st
 import google.protobuf.json_format
 import strategies
@@ -58,8 +60,6 @@ def test_proto_export(tmp_path, typedef, name):
         mode="w", dir=str(tmp_path), suffix=".proto", delete=True
     ) as outfile:
         typedef_map = {name: typedef}
-
-        note(typedef_map)
 
         # Trying exporting as string first
         protofile.export_proto(typedef_map)
@@ -132,12 +132,9 @@ def test_proto_export_inverse(tmp_path, x, name):
 
                     _check_field_types(message_typedef1, message_typedef2)
 
-        note(typedef_map)
-        note(new_typedef_map)
         for name, typedef in typedef_map.items():
             _check_field_types(typedef, new_typedef_map[name])
 
-        note(new_typedef_map[name])
         # try to actually encode a message with the typedef
         encode_forward = length_delim.encode_message(
             message, config, TypeDef.from_dict(typedef_map[name])
@@ -205,28 +202,29 @@ def test_proto_decode(tmp_path, x, name):
             message, config, TypeDef.from_dict(typedef)
         )
 
-        note(typedef_map)
         basename = os.path.basename(outfile.name)
 
         # Export the protobuf file and compile it
         protofile.export_proto(typedef_map, output_file=outfile, package=basename[:-6])
+        outfile.flush()
 
         py_out = str(tmp_path / "py_out")
         if os.path.exists(py_out):
             shutil.rmtree(py_out)
         os.mkdir(py_out)
-        outfile.flush()
         subprocess.check_call(
-            "/usr/bin/protoc --python_out ./py_out %s" % basename,
+            "/usr/bin/protoc --python_out ./py_out %s 2>&1" % basename,
             shell=True,
             cwd=str(tmp_path),
         )
+        # This shouldn't be nescessary, but get weird bugs trying to import below without a pause. Likely environment specific
+        time.sleep(0.01)
 
         # Try to import the file
         sys.path.insert(0, str(tmp_path) + "/py_out/")
-        # Trim off .proto
         try:
-            proto_module = __import__(basename[:-6] + "_pb2")
+            # Trim off .proto
+            proto_module = importlib.import_module(basename[:-6] + "_pb2")
             del sys.path[0]
         except SyntaxError:
             logging.debug("Caught syntax error in protoc import")
@@ -234,7 +232,6 @@ def test_proto_decode(tmp_path, x, name):
 
         message_class = getattr(proto_module, name)
 
-        note(encoded_message)
         my_message = message_class()
         my_message.ParseFromString(encoded_message)
 
@@ -242,17 +239,7 @@ def test_proto_decode(tmp_path, x, name):
             my_message, including_default_value_fields=True
         )
 
-        note(message)
-        note(decoded_message)
-        note(
-            google.protobuf.json_format.MessageToJson(
-                my_message, including_default_value_fields=True
-            )
-        )
-
         def _check_field_match(orig_value, new_value):
-            note(type(new_value))
-            note(type(orig_value))
             if isinstance(orig_value, six.integer_types) and isinstance(new_value, str):
                 assert str(orig_value) == new_value
             elif isinstance(orig_value, bytes):

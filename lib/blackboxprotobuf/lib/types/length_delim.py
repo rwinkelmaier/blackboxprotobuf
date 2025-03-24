@@ -438,6 +438,11 @@ def _group_by_number(buf, pos, end, path):
     while pos < end:
         # Read in a field
         field_number, wire_type, pos = decode_tag(buf, pos)
+        if pos == end:
+            # Every wire type except groups require some bytes after the tag
+            raise DecoderException(
+                "Bytestring does not have sufficient bytes after protobuf tag"
+            )
 
         # We want field numbers as strings everywhere
         field_id = six.ensure_text(str(field_number))
@@ -454,9 +459,16 @@ def _group_by_number(buf, pos, end, path):
 
         length = None
         if wire_type == wiretypes.VARINT:
-            # We actually have to read in the whole varint to figure out it's size
-            _, new_pos = varint.decode_uvarint(buf, pos)
-            length = new_pos - pos
+            byte_pos = pos
+            max_pos = min(pos + varint.MAX_VARINT_LEN, end)
+            while six.indexbytes(buf, byte_pos) & 0x80:
+                byte_pos += 1
+                if byte_pos >= max_pos:
+                    raise DecoderException(
+                        "Byte position exceeded message length while decoding. Protobuf message is invalid"
+                    )
+            byte_pos += 1
+            length = byte_pos - pos
         elif wire_type == wiretypes.FIXED32:
             length = 4
         elif wire_type == wiretypes.FIXED64:
@@ -648,9 +660,13 @@ def decode_lendelim_message(buf, config, typedef=None, pos=0, depth=0, path=None
     # type: (bytes, Config, Optional[TypeDef], int, int, Optional[List[str]]) -> Tuple[Message, TypeDef, List[str], int]
     """Deocde a length delimited protobuf message from buf"""
     length, pos = varint.decode_varint(buf, pos)
-    ret = decode_message(
-        buf, config, typedef, pos, pos + length, depth=depth, path=path
-    )
+    end = pos + length
+    if end > len(buf):
+        raise DecoderException(
+            "Bytestring is an invalid lenght delimited messages. The length prefix (%s) is longer than the buffer (%s)"
+            % (end, len(buf))
+        )
+    ret = decode_message(buf, config, typedef, pos, end, depth=depth, path=path)
     return ret
 
 

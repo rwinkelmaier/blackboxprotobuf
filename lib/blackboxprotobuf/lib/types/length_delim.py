@@ -289,6 +289,9 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
     if path is None:
         path = []
 
+    if isinstance(buf, bytearray):
+        buf = bytes(buf)
+
     output = {}  # type: Message
     seen_repeated = {}  # type: Dict[str, bool]
     mut_typedef = typedef.make_mutable()

@@ -159,14 +159,12 @@ def encode_message(data, config, typedef, path=None, field_order=None):
         path = []
 
     output_len = 0
-    field_outputs = {}  # type: Dict[str, List[ByteString]]
+    field_outputs = {}  # type: Dict[str, List[Tuple[ByteString, ByteString]]]
     for field_id, value in data.items():
         field_number, outputs = _encode_message_field(
             config, typedef, path, field_id, value
         )
 
-        # In case the field number is represented in multiple locations in data
-        # (eg. as an int, as name, as a string with an int)
         field_outputs.setdefault(field_number, []).extend(outputs)
         output_len += len(outputs)
 
@@ -181,7 +179,9 @@ def encode_message(data, config, typedef, path=None, field_order=None):
                 field_order = [x[0] for x in field_order]
             for field_number in field_order:
                 try:
-                    output += field_outputs[field_number].pop(0)
+                    tag, field_output = field_outputs[field_number].pop(0)
+                    output += tag
+                    output += field_output
                 except (IndexError, KeyError):
                     # If these don't match up despite us checking the overall
                     # length, then we probably have something weird going on
@@ -198,14 +198,15 @@ def encode_message(data, config, typedef, path=None, field_order=None):
 
         # Group  together elements in an array
         for values in field_outputs.values():
-            for value in values:
+            for tag, value in values:
+                output += tag
                 output += value
 
     return output
 
 
 def _encode_message_field(config, typedef, path, field_id, value):
-    # type: (Config, TypeDef, List[str], str | int, Any) -> Tuple[str, List[ByteString]]
+    # type: (Config, TypeDef, List[str], str | int, Any) -> Tuple[str, List[Tuple[ByteString, ByteString]]]
 
     if not isinstance(field_id, six.text_type):
         field_key = six.ensure_text(str(field_id))  # type: str
@@ -258,16 +259,16 @@ def _encode_message_field(config, typedef, path, field_id, value):
         int(field_number), blackboxprotobuf.lib.types.WIRETYPES[field_type]
     )
 
-    outputs = []  # type: list[ByteString]
+    outputs = []  # type: list[Tuple[ByteString, ByteString]]
     try:
         # Repeated values we'll encode each one separately and add them to the outputs list
         # Packed values take in a list, but encode them into a single length
         # delimited field, so we handle those as a non-repeated value
         if isinstance(value, list) and not field_type.startswith("packed_"):
             for repeated in value:
-                outputs.append(tag + field_encoder(repeated))
+                outputs.append((tag, field_encoder(repeated)))
         else:
-            outputs.append(tag + field_encoder(value))
+            outputs.append((tag, field_encoder(value)))
 
     except EncoderException as exc:
         exc.set_path(field_path)

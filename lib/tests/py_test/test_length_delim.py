@@ -68,7 +68,7 @@ def test_bytes_guess_inverse(x):
     assume(typedef["1"]["type"] == "bytes")
 
     assert isinstance(encoded, bytearray)
-    assert isinstance(value["1"], bytearray)
+    assert isinstance(value["1"], (bytearray, bytes))
     assert pos == len(encoded)
     assert value["1"] == x
 

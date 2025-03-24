@@ -293,7 +293,7 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
     mut_typedef = typedef.make_mutable()
 
     grouped_fields, field_order, pos = _group_by_number(buf, pos, end, path)
-    for field_number, (wire_type, buffers) in grouped_fields.items():
+    for field_number, (wire_type, field_starts) in grouped_fields.items():
         # wire_type should already be validated by _group_by_number
 
         field_path = path[:] + [field_number]
@@ -312,7 +312,7 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
             fielddef.lookup_field_type_number("0", config, field_path), six.string_types
         ):
             output_map, new_fielddef = _try_decode_lendelim_fields(
-                buffers, fielddef, config, field_path
+                buf, field_starts, fielddef, config, field_path
             )
 
             # Merge length delim field into the output map
@@ -322,7 +322,7 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
             mut_typedef.set_fielddef(field_number, new_fielddef)
         else:
             field_outputs, new_fielddef, field_alt_type_id = _decode_standard_field(
-                wire_type, buffers, fielddef, config, path
+                buf, wire_type, field_starts, fielddef, config, path
             )
 
             field_key = new_fielddef.field_key(field_alt_type_id)
@@ -336,8 +336,8 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
     return output, mut_typedef, field_order, pos
 
 
-def _decode_standard_field(wire_type, buffers, fielddef, config, field_path):
-    # type: (int, List[bytes], FieldDef, Config, List[str]) -> Tuple[List[Any], FieldDef, str]
+def _decode_standard_field(buf, wire_type, field_starts, fielddef, config, field_path):
+    # type: (bytes, int, List[int], FieldDef, Config, List[str]) -> Tuple[List[Any], FieldDef, str]
     field_outputs = None
     field_alt_type_id = None
     for alt_type_id, field_type in fielddef.resolve_types(config, field_path).items():
@@ -361,7 +361,9 @@ def _decode_standard_field(wire_type, buffers, fielddef, config, field_path):
             )
         decoder = blackboxprotobuf.lib.types.DECODERS[field_type]
         try:
-            field_outputs = [decoder(buf, 0)[0] for buf in buffers]
+            field_outputs = [
+                decoder(buf, field_start)[0] for field_start in field_starts
+            ]
             field_alt_type_id = alt_type_id
         except BlackboxProtobufException as exc:
             # Error decoding, try next one if we have one
@@ -373,7 +375,9 @@ def _decode_standard_field(wire_type, buffers, fielddef, config, field_path):
         field_type = config.get_default_type(wire_type)
         default_decoder = blackboxprotobuf.lib.types.DECODERS[field_type]
 
-        field_outputs = [default_decoder(buf, 0)[0] for buf in buffers]
+        field_outputs = [
+            default_decoder(buf, field_start)[0] for field_start in field_starts
+        ]
 
     mut_fielddef = fielddef.make_mutable()
     if field_alt_type_id is None:
@@ -414,7 +418,7 @@ def _simplify_output(output, seen_repeated):
 
 
 def _group_by_number(buf, pos, end, path):
-    # type: (bytes, int, int, List[str]) -> Tuple[Dict[str, Tuple[int, List[bytes]]], List[str], int]
+    # type: (bytes, int, int, List[str]) -> Tuple[Dict[str, Tuple[int, List[int]]], List[str], int]
     # Parse through the whole message and split into buffers based on wire
     # type and organized by field number. This forces us to parse the whole
     # message at once, but I think we're doing that anyway. This catches size
@@ -425,7 +429,7 @@ def _group_by_number(buf, pos, end, path):
     #         "2": (<wiretype>, [<data>])
     #     }
 
-    output_map = {}  # type: Dict[str, Tuple[int, List[bytes]]]
+    output_map = {}  # type: Dict[str, Tuple[int, List[int]]]
     field_order = []
     while pos < end:
         # Read in a field
@@ -474,19 +478,17 @@ def _group_by_number(buf, pos, end, path):
                 path=field_path,
             )
 
-        field_buf = buf[pos : pos + length]
-
         if field_id in output_map:
-            output_map[field_id][1].append(field_buf)
+            output_map[field_id][1].append(pos)
         else:
-            output_map[field_id] = (wire_type, [field_buf])
+            output_map[field_id] = (wire_type, [pos])
         field_order.append(field_id)
         pos += length
     return output_map, field_order, pos
 
 
-def _try_decode_lendelim_fields(buffers, fielddef, config, path):
-    # type: (List[bytes], FieldDef, Config, List[str]) -> Tuple[Message, FieldDef]
+def _try_decode_lendelim_fields(buf, field_starts, fielddef, config, path):
+    # type: (bytes, List[int], FieldDef, Config, List[str]) -> Tuple[Message, FieldDef]
     # Mutates message_output
 
     # This is where things get weird
@@ -518,7 +520,7 @@ def _try_decode_lendelim_fields(buffers, fielddef, config, path):
 
         # We don't want any mutable changes within this loop, we want
         # everything to rollback if it fails
-        for buf in buffers:
+        for field_start in field_starts:
             output = None
             output_typedef = None
             output_typedef_num = None
@@ -537,7 +539,9 @@ def _try_decode_lendelim_fields(buffers, fielddef, config, path):
                         output_typedef,
                         new_field_order,
                         _,
-                    ) = decode_lendelim_message(buf, config, field_type)
+                    ) = decode_lendelim_message(
+                        buf, config, field_type, pos=field_start
+                    )
                 except Exception as exc:
                     # If we get an exception, then this isn't the right typedef, try the next
                     continue
@@ -549,7 +553,7 @@ def _try_decode_lendelim_fields(buffers, fielddef, config, path):
             # If this fails, we fall back to string and bytes for all types
             if output is None:
                 output, output_typedef, new_field_order, _ = decode_lendelim_message(
-                    buf, config, None
+                    buf, config, None, pos=field_start
                 )
                 output_typedef_num = six.ensure_text(str(next_alt_type_id))
                 next_alt_type_id += 1
@@ -600,8 +604,8 @@ def _try_decode_lendelim_fields(buffers, fielddef, config, path):
         try:
             outputs = []
             decoder = blackboxprotobuf.lib.types.DECODERS[target_type]
-            for buf in buffers:
-                output, _ = decoder(buf, 0)
+            for field_start in field_starts:
+                output, _ = decoder(buf, field_start)
                 outputs.append(output)
 
             field_alt_type_id = None

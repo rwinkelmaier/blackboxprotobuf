@@ -516,5 +516,5 @@ def test_bytes_fallback(x):
 
     encoded = length_delim.encode_bytes(x)
     decoded, pos = length_delim._try_decode_lendelim_fields(
-        [encoded], FieldDef(1), config, []
+        encoded, [0], FieldDef(1), config, []
     )

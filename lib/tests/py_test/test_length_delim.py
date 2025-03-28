@@ -104,9 +104,6 @@ def test_message_inverse(x):
         encoded, config, TypeDef.from_dict(typedef), 0
     )
     typedef_out = typedef_out.to_dict()
-    note(encoded)
-    note(typedef)
-    note(typedef_out)
     assert isinstance(encoded, bytearray)
     assert isinstance(decoded, dict)
     assert pos == len(encoded)
@@ -242,7 +239,6 @@ def test_message_guess_inverse(x):
     )
     decoded_type = decoded_type.to_dict()
 
-    note(value)
     assert decoded_type["1"]["type"] == "message"
 
     assert isinstance(encoded, bytearray)

@@ -25,6 +25,7 @@ protobuf = "^3.20"
 
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.10.0"
+pytest-profiling = "^1.8.1"
 
 [tool.poetry.scripts]
 bbpb = "blackboxprotobuf.__main__:main"

@@ -133,11 +133,11 @@ def encode_message(value, message_type, config=None):
 
 def protobuf_to_json(buf, message_type=None, config=None):
     # type: (bytes | list[bytes], Optional[str | TypeDefDict | TypeDef], Optional[Config]) -> tuple[str, TypeDefDict]
-    """Decode a protobuf messages and return a JSON string representing the
-    messages.
+    """Decode one or more protobuf messages and return a JSON string
+    representing the messages.
 
     Args:
-        buf: One or more bytes representing encoded protobuf messages
+        buf: One or more byte strings representing encoded protobuf messages
         message_type: Optional type to use as the base for decoding. Allows for
             customizing field types or names. Can be a python dictionary or a
             message type name which maps to the `known_types` dictionary in the

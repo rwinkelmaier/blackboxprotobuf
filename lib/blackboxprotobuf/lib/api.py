@@ -390,6 +390,10 @@ def wrapped_protobuf_to_json(buf, message_type=None, encoding=None, config=None)
     """
     if config is None:
         config = default_config
+
+    if isinstance(buf, bytearray):
+        buf = bytes(buf)
+
     if encoding is None:
         decoders = payloads.find_decoders(buf)
         for decoder in decoders:

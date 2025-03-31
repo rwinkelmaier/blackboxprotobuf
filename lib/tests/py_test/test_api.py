@@ -22,6 +22,9 @@ def test_encode_empty_typedef():
         payload = blackboxprotobuf.protobuf_from_json("{}", typedef)
         assert len(payload) == 0
 
+        payload = blackboxprotobuf.wrapped_protobuf_from_json("{}", typedef, "none")
+        assert len(payload) == 0
+
         message = {"1": 0}
         with pytest.raises(TypedefException):
             payload = blackboxprotobuf.encode_message(message, typedef)
@@ -30,6 +33,10 @@ def test_encode_empty_typedef():
         with pytest.raises(TypedefException):
             payload = blackboxprotobuf.encode_wrapped_message(
                 [message], typedef, "none"
+            )
+        with pytest.raises(TypedefException):
+            payload = blackboxprotobuf.wrapped_protobuf_from_json(
+                '{"1": 0}', typedef, "none"
             )
 
 
@@ -44,3 +51,5 @@ def test_invalid_typedef_string():
         payload = blackboxprotobuf.protobuf_from_json("{}", typedef)
     with pytest.raises(TypedefException):
         payload = blackboxprotobuf.encode_wrapped_message([message], typedef, "none")
+    with pytest.raises(TypedefException):
+        payload = blackboxprotobuf.wrapped_protobuf_from_json("{}", typedef, "none")

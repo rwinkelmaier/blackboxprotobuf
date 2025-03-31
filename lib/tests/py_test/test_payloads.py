@@ -155,3 +155,37 @@ def test_wrapped_message(x, chosen_encoding):
         new_protobuf_data[0], original_typedef, config
     )
     assert message == new_message
+
+
+@given(
+    x=strategies.gen_message(anon=True),
+    chosen_encoding=st.sampled_from(["grpc", "gzip", "none"]),
+)
+def test_wrapped_message_json(x, chosen_encoding):
+    config = Config()
+
+    original_typedef, message = x
+    protobuf_data = blackboxprotobuf.encode_message(message, original_typedef, config)
+    data = payloads.encode_payload(protobuf_data, chosen_encoding)
+
+    messages, typedef, encoding = blackboxprotobuf.wrapped_protobuf_to_json(
+        data, encoding=chosen_encoding, config=config
+    )
+    assert encoding == chosen_encoding
+
+    messages, typedef, encoding = blackboxprotobuf.wrapped_protobuf_to_json(
+        data, config=config
+    )
+    assert encoding == chosen_encoding
+
+    payload = blackboxprotobuf.wrapped_protobuf_from_json(
+        messages, typedef, encoding, config
+    )
+    assert isinstance(payload, bytes)
+
+    new_protobuf_data, encoding = payloads.decode_payload(payload, chosen_encoding)
+    # can't check against protobuf_data because of field ordering
+    new_message, _ = blackboxprotobuf.decode_message(
+        new_protobuf_data[0], original_typedef, config
+    )
+    assert message == new_message

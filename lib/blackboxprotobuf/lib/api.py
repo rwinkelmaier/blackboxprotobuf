@@ -59,7 +59,7 @@ if six.PY3:
 
     # Circular imports on Config if we don't check here
     if typing.TYPE_CHECKING:
-        from typing import Dict, List, Optional
+        from typing import Dict, List, Tuple, Optional, ByteString
         from blackboxprotobuf.lib.pytypes import Message, TypeDefDict, FieldDefDict
         from blackboxprotobuf.lib.config import Config
 
@@ -352,6 +352,109 @@ def encode_wrapped_message(messages, message_type, encoding, config=None):
             message, config, typedef
         )
         values.append(bytes(value))
+    wrapped_payload = payloads.encode_payload(values, encoding)
+    return wrapped_payload
+
+
+def wrapped_protobuf_to_json(buf, message_type=None, encoding=None, config=None):
+    # type: (ByteString, Optional[str | TypeDefDict | TypeDef], Optional[str], Optional[Config]) -> Tuple[str, TypeDefDict, str]
+    """Decode a protobuf message, which may be encoded with gRPC or gzip, and
+    return a JSON string representing the messages.
+
+    Args:
+        buf: A bytestring representing an encoded protobuf message
+        message_type: Optional type to use as the base for decoding. Allows for
+            customizing field types or names. Can be a python dictionary or a
+            message type name which maps to the `known_types` dictionary in the
+            config. Defaults to an empty definition '{}'.
+        encoding: A string identifying the encoding type. If not provided, or
+            set to `None`, the encoding will be guessed through trial and
+            error. Valid values are:
+                - "gRPC" - gRPC header. Can decode to multiple messages
+                - "gzip" - gzip encoding
+                - "none" - no encoding
+        config: `blackboxprotobuf.lib.config.Config` object which allows
+            customizing default types for wire types and holds the
+            `known_types` array. Defaults to
+            `blackboxprotobuf.lib.config.default` if not provided.
+    Returns:
+        A tuple containing a JSON string representing the messages, a type
+        definition for re-encoding the messages and the wrapper encoding.
+
+        The JSON string and type definition are annotated and sorted for
+        readability.
+
+        The type definition is based on the `message_type` argument if one was
+        provided, but may add additional fields if new fields were encountered
+        during decoding.
+    """
+    if config is None:
+        config = default_config
+    if encoding is None:
+        decoders = payloads.find_decoders(buf)
+        for decoder in decoders:
+            try:
+                protobuf_datas, encoding = decoder(buf)
+            except BlackboxProtobufException:
+                # Error while decoding wrapper, skip to next alg
+                continue
+            try:
+                message, typedef = protobuf_to_json(
+                    protobuf_datas, message_type, config
+                )
+                return message, typedef, encoding
+            except BlackboxProtobufException as exc:
+                # If we hit an error decoding, we have to assume we have the
+                # wrong payload wrapper unless we are already using 'none'
+                if encoding == "none":
+                    six.raise_from(
+                        DecoderException(
+                            "Unable to decode protobuf message with any encoding algorithm"
+                        ),
+                        exc,
+                    )
+                continue
+        # Should not hit this due to the raise on "none" encoding alg
+        raise DecoderException(
+            "Unable to decode protobuf message with any encoding algorithm"
+        )
+    else:
+        protobuf_datas, encoding = payloads.decode_payload(buf, encoding)
+        message, typedef = protobuf_to_json(protobuf_datas, message_type, config)
+
+        return message, typedef, encoding
+
+
+def wrapped_protobuf_from_json(json_str, message_type, encoding, config=None):
+    # type: (str, str | TypeDefDict | TypeDef, str, Optional[Config]) -> bytes
+    """Re-encode a JSON string as a binary protobuf message with optional
+    additional encoding, such as gRPC or gzip.
+
+    Args:
+        json_str: JSON string to re-encode to protobuf message bytes. This
+            should usually be a modified version of the value returned by
+            `protobuf_to_json`.
+        message_type: Type definition to use to re-encode the message. This
+            will should generally be the type definition returned from the
+            original `protobuf_to_json` call.
+        encoding: "Outer" encoding mechanisms for protobuf payload. The
+            encoding returned by `wrapped_protobuf_to_json` should generally be
+            used here.
+            Valid algorithms are:
+            - "gRPC" - gRPC header with length. Can encode multiple messages
+            - "gzip"
+            - "none"
+        config: `blackboxprotobuf.lib.config.Config` object which allows
+            customizing default types for wire types and holds the
+            `known_types` array. Defaults to
+            `blackboxprotobuf.lib.config.default` if not provided.
+    Returns:
+        A bytearray containing the encoded protobuf message.
+    """
+    if config is None:
+        config = default_config
+
+    values = protobuf_from_json(json_str, message_type, config)
     wrapped_payload = payloads.encode_payload(values, encoding)
     return wrapped_payload
 

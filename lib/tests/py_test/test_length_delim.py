@@ -22,6 +22,7 @@ from hypothesis import given, assume, note, example, reproduce_failure
 import hypothesis.strategies as st
 import collections
 import strategies
+import string
 import six
 import copy
 import binascii
@@ -514,3 +515,18 @@ def test_bytes_fallback(x):
     decoded, pos = length_delim._try_decode_lendelim_fields(
         encoded, [0], FieldDef(1), config, []
     )
+
+
+@given(x=st.text(alphabet=string.digits + string.ascii_letters + string.punctuation))
+@example(x="image.png")
+def test_string_detection(x):
+    # Try to prefer strings
+    config = Config()
+    typedef = TypeDef.from_dict({"1": {"type": "string"}})
+    assert length_delim._is_printable(x)
+    message = {"1": x}
+    encoded = length_delim.encode_message(message, config, typedef)
+
+    decoded, new_typedef, _, _ = length_delim.decode_message(encoded, config, TypeDef())
+    assert new_typedef.to_dict()["1"]["type"] == "string"
+    assert decoded["1"] == x

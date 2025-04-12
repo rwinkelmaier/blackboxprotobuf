@@ -28,7 +28,7 @@ import copy
 import binascii
 
 from blackboxprotobuf.lib.config import Config
-from blackboxprotobuf.lib.types import length_delim
+from blackboxprotobuf.lib.types import length_delim, varint
 from blackboxprotobuf.lib.types import type_maps
 from blackboxprotobuf.lib.typedef import TypeDef, FieldDef
 
@@ -109,6 +109,28 @@ def test_message_inverse(x):
     assert isinstance(decoded, dict)
     assert pos == len(encoded)
     assert message == decoded
+
+
+def test_anon_decode_recursion():
+    # Specific payload for test_anon_decode that triggers infinite loop in group_by number if
+    # a length is parsed as a varint instead of a uvarint
+    config = Config()
+    encoded_length = varint.encode_varint(-11)
+    buf = (
+        encoded_length
+        + b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    )
+    tag = varint.encode_varint((1 << 3 | 2))
+    buf = tag + buf
+    message = {"1": buf}
+    typedef = {"1": {"type": "bytes"}}
+    encoded_message = length_delim.encode_message(
+        message, config, TypeDef.from_dict(typedef)
+    )
+    decoded, typedef_out, _, pos = length_delim.decode_message(
+        encoded_message, config, TypeDef(), 0
+    )
+    assert typedef_out.to_dict()["1"]["type"] != message
 
 
 @given(x=strategies.gen_message(anon=True))

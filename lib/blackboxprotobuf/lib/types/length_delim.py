@@ -87,7 +87,7 @@ def encode_bytes(value):
 def decode_bytes(buf, pos):
     # type: (bytes, int) -> Tuple[bytes, int]
     """Decode a length delimited bytes array from buf"""
-    length, pos = varint.decode_varint(buf, pos)
+    length, pos = varint.decode_uvarint(buf, pos)
     end = pos + length
     try:
         return buf[pos:end], end
@@ -125,7 +125,7 @@ def decode_bytes_hex(buf, pos):
 def decode_string(value, pos):
     # type: (bytes, int) -> Tuple[str, int]
     """Decode a length delimited byte array as a string"""
-    length, pos = varint.decode_varint(value, pos)
+    length, pos = varint.decode_uvarint(value, pos)
     end = pos + length
     try:
         # backslash escaping isn't reversible easily
@@ -476,7 +476,7 @@ def _group_by_number(buf, pos, end, path):
         elif wire_type == wiretypes.LENGTH_DELIMITED:
             # Read the length from the start of the message
             # add on the length of the length tag as well
-            bytes_length, new_pos = varint.decode_varint(buf, pos)
+            bytes_length, new_pos = varint.decode_uvarint(buf, pos)
             length = bytes_length + (new_pos - pos)
         elif wire_type in [
             wiretypes.START_GROUP,
@@ -499,6 +499,8 @@ def _group_by_number(buf, pos, end, path):
         else:
             output_map[field_id] = (wire_type, [pos])
         field_order.append(field_id)
+
+        assert length >= 0
         pos += length
     return output_map, field_order, pos
 
@@ -659,7 +661,7 @@ def encode_lendelim_message(data, config, typedef, path=None, field_order=None):
 def decode_lendelim_message(buf, config, typedef=None, pos=0, depth=0, path=None):
     # type: (bytes, Config, Optional[TypeDef], int, int, Optional[List[str]]) -> Tuple[Message, TypeDef, List[str], int]
     """Deocde a length delimited protobuf message from buf"""
-    length, pos = varint.decode_varint(buf, pos)
+    length, pos = varint.decode_uvarint(buf, pos)
     end = pos + length
     if end > len(buf):
         raise DecoderException(
@@ -693,7 +695,7 @@ def generate_packed_decoder(wrapped_decoder):
     def length_wrapper(buf, pos):
         # type: (bytes, int) -> Tuple[List[Any], int]
         # Decode repeat values prefixed with the length
-        length, pos = varint.decode_varint(buf, pos)
+        length, pos = varint.decode_uvarint(buf, pos)
         end = pos + length
         output = []
         while pos < end:

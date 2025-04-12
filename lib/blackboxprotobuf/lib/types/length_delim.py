@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 import binascii
+import string
 import copy
 import sys
 import six
@@ -318,6 +319,8 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
             output_map, new_fielddef = _try_decode_lendelim_fields(
                 buf, field_starts, fielddef, config, field_path
             )
+            if len(field_starts) > 1:
+                new_fielddef.mark_repeated()
 
             # Merge length delim field into the output map
             for field_key, field_outputs in output_map.items():
@@ -341,7 +344,7 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
 
 
 def _decode_standard_field(buf, wire_type, field_starts, fielddef, config, field_path):
-    # type: (bytes, int, List[int], FieldDef, Config, List[str]) -> Tuple[List[Any], FieldDef, str]
+    # type: (bytes, int, List[int], FieldDef, Config, List[str]) -> Tuple[List[Any], MutableFieldDef, str]
     field_outputs = None
     field_alt_type_id = None
     for alt_type_id, field_type in fielddef.resolve_types(config, field_path).items():
@@ -505,147 +508,172 @@ def _group_by_number(buf, pos, end, path):
     return output_map, field_order, pos
 
 
+_PRINTABLE_CHARS = set(string.digits + string.ascii_letters + string.punctuation)
+
+
+def _is_printable_py2(value):
+    # type: (str) -> bool
+    return all(c in _PRINTABLE_CHARS for c in value)
+
+
+# string.isprintable is much quicker in python3, but not available in python2 or jython
+_is_printable = (
+    _is_printable_py2 if six.PY2 else lambda x: x.isprintable()
+)  # type: Callable[[str], bool]
+
+
 def _try_decode_lendelim_fields(buf, field_starts, fielddef, config, path):
-    # type: (bytes, List[int], FieldDef, Config, List[str]) -> Tuple[Message, FieldDef]
-    # Mutates message_output
+    # type: (bytes, List[int], FieldDef, Config, List[str]) -> Tuple[Message, MutableFieldDef]
 
-    # This is where things get weird
-    # To start, since we want to decode messages and not treat every
-    # embedded message as bytes, we have to guess if it's a message or
-    # not.
-    # Unlike other types, we can't assume our message types are
-    # consistent across the tree or even within the same message.
-    # A field could be a bytes type that that decodes to multiple different
-    # messages that don't have the same type definition. This is where
-    # 'alt_typedefs' let us say that these are the different message types
-    # we've seen for this one field.
-    # In general, if something decodes as a message once, the rest should too
-    # and we can enforce that across a single message, but not multiple
-    # messages.
-    # This is going to change the definition of "alt_typedefs" a bit from just
-    # alternate message type definitions to also allowing downgrading to
-    # 'bytes' or string with an 'alt_type' if it doesn't parse
+    # Goals:
+    #   Try to enforce a consistent type (but not typedef) across all fields we know about
+    #   Allow different typedefs, as long as all fields are valid 'message' types
+    #   Prefer printable strings before anonymous typedefs
 
-    message_output = {}  # type: Message
+    # Does not set seen_repeated on the field, caller must set this flag
+    previous_message_types = [
+        field_type
+        for field_type in fielddef.resolve_types(config, path).items()
+        if isinstance(field_type[1], TypeDef)
+    ]  # type: List[Tuple[str, str | TypeDef]]
 
+    # Step 1: Try decoding as printable string based on `isprintable()`. Note that this does not allow whitespace
+    string_fields = None  # type: Optional[List[str]]
+    string_decoding_failed = False
+    if not previous_message_types:
+        string_fields = []
+        try:
+            # No previous message types, so lets check if they're all text
+            for field_start in field_starts:
+                output, _ = decode_string(buf, field_start)
+                string_fields.append(output)
+            if all(_is_printable(field) for field in string_fields):
+                # Everything is a printable string, return those strings
+                output_fielddef = fielddef.make_mutable()
+                string_alt_type_id = output_fielddef.add_type("string")
+
+                field_key = output_fielddef.field_key(string_alt_type_id)
+                message_output = {field_key: string_fields}  # type: Message
+
+                # All fields successfully decoded as printable
+                return message_output, output_fielddef
+        except DecoderException as exc:
+            # Error decoding one of the fields as a string, we mark it as
+            # failed so we don't try again later
+            string_fields = None
+            string_decoding_failed = True
+
+    # Step 2: Try decoding as message
     try:
-        outputs_map = {}  # type: Dict[str, Any]
-        field_order = []  # type: List[str]
-
-        next_alt_type_id = int(fielddef.next_alt_type_id())
-        field_types = fielddef.resolve_types(config, path)
-
-        # We don't want any mutable changes within this loop, we want
-        # everything to rollback if it fails
+        message_output = {}
+        output_fielddef = fielddef.make_mutable()
         for field_start in field_starts:
-            output = None
-            output_typedef = None
-            output_typedef_num = None
-            new_field_order = []  # type: List[str]
-
-            for alt_type_id, field_type in sorted(
-                field_types.items(), key=lambda x: int(x[0])
-            ):
-                # Skip non message types
+            message_field_output = None  # type: Optional[Message]
+            field_typedef = None
+            alt_type_id = None
+            # Step 2.1 Try decoding with existing message type
+            for alt_type_id, field_type in previous_message_types:
                 if not isinstance(field_type, TypeDef):
+                    # shouldn't happen because we filtered earlier
                     continue
-
                 try:
                     (
-                        output,
-                        output_typedef,
-                        new_field_order,
+                        message_field_output,
+                        field_typedef,
+                        _,  # We ignore field order if we're going based on an existing typedef
                         _,
                     ) = decode_lendelim_message(
-                        buf, config, field_type, pos=field_start
+                        buf, config, field_type, pos=field_start, path=path
                     )
+                    break
                 except Exception as exc:
+                    assert isinstance(
+                        exc, DecoderException
+                    )  # TODO should always get decoder exceptions, but maybe we'll get some surprises we want to catch
                     # If we get an exception, then this isn't the right typedef, try the next
                     continue
 
-                output_typedef_num = alt_type_id
-                # If we didn't get an exception, then we found the right type
-                break
-            # If we didn't find a type above, then try an anonymous type
-            # If this fails, we fall back to string and bytes for all types
-            if output is None:
-                output, output_typedef, new_field_order, _ = decode_lendelim_message(
-                    buf, config, None, pos=field_start
+            if message_field_output is None:
+                (
+                    message_field_output,
+                    field_typedef,
+                    field_order,
+                    _,
+                ) = decode_lendelim_message(
+                    buf, config, None, pos=field_start, path=path
                 )
-                output_typedef_num = six.ensure_text(str(next_alt_type_id))
-                next_alt_type_id += 1
+                # Save the field typedef
+                alt_type_id = output_fielddef.add_type(field_typedef)
+                output_fielddef.set_field_order(field_order)
 
-            if output_typedef is None or output_typedef_num is None:
-                raise DecoderException(
-                    "Could not find an output_typedef or output_typedef_num. This should not happen under any circumstances."
-                )
+                # Add this to previous_message_types so other fields can use it
+                previous_message_types.append((alt_type_id, field_typedef))
 
-            # save the output or typedef we found
-            field_types[output_typedef_num] = output_typedef
-            outputs_map.setdefault(output_typedef_num, []).append(output)
+            field_key = output_fielddef.field_key(alt_type_id)
+            message_output.setdefault(field_key, []).append(message_field_output)
 
-            # we should technically have a different field order for each instance of the data
-            # but that would require a very messy JSON which we're trying to avoid
-            if len(new_field_order) > len(field_order):
-                field_order = new_field_order
+        # All the fields decoded as a message
+        return message_output, output_fielddef
 
-        # was able to decode everything as a message
-        mut_fielddef = fielddef.make_mutable()
-        mut_fielddef.set_types(field_types)
-
-        if config.preserve_field_order:
-            mut_fielddef.set_field_order(field_order)
-
-        # messages get set as "key-alt_number"
-        for output_typedef_num, outputs in outputs_map.items():
-            output_field_key = mut_fielddef.field_key(output_typedef_num)
-
-            message_output[output_field_key] = outputs
-            if len(outputs) > 1:
-                mut_fielddef.mark_repeated()
-
-        # success, return
-        return message_output, mut_fielddef
     except DecoderException as exc:
-        # this should be pretty common, don't be noisy or throw an exception
-        logger.debug(
-            "Could not decode a buffer for field (%s) as a message: %s",
-            path,
-            exc,
-        )
+        # we hit an error decoding with an anonymous typedef, therefore field
+        # is not a message type
+        pass
 
-    # Decoding as a message did not work, try strings and then the configured binary type
-    # By default, default_binary_type will be redundant with bytes, but we want
-    # to fall back on bytes if default_binary_type fails for any reason
-    for target_type in ["string", config.default_binary_type, "bytes"]:
-        try:
-            outputs = []
-            decoder = blackboxprotobuf.lib.types.DECODERS[target_type]
-            for field_start in field_starts:
-                output, _ = decoder(buf, field_start)
-                outputs.append(output)
+    # Step 3: Fallback to string and binary types
 
-            field_alt_type_id = None
-            # check if the type is already known
-            field_types = fielddef.resolve_types(config, path)
-            for alt_type_id, field_type in field_types.items():
-                if field_type == target_type:
-                    field_alt_type_id = alt_type_id
-                    break
+    # Step 3.1: Check for string type
+    try:
+        if not string_decoding_failed:
+            if not string_fields:
+                string_fields = []
+                for field_start in field_starts:
+                    output, _ = decode_string(buf, field_start)
+                    string_fields.append(output)
+            output_fielddef = fielddef.make_mutable()
+            alt_type_id = output_fielddef.add_type("string")
+            field_key = output_fielddef.field_key(alt_type_id)
+            message_output = {field_key: string_fields}
+            return message_output, output_fielddef
 
-            mut_fielddef = fielddef.make_mutable()
-            if field_alt_type_id is None:
-                field_alt_type_id = mut_fielddef.add_type(target_type)
+    except DecoderException:
+        # String decoding failed for at least one string
+        pass
 
-            field_key = mut_fielddef.field_key(field_alt_type_id)  # type: str
+    # Step 3.2: Check config.default_binary_type
+    try:
+        outputs = []
+        target_type = config.default_binary_type
+        decoder = blackboxprotobuf.lib.types.DECODERS[target_type]
+        for field_start in field_starts:
+            output, _ = decoder(buf, field_start)
+            outputs.append(output)
+        output_fielddef = fielddef.make_mutable()
+        alt_type_id = output_fielddef.add_type(target_type)
 
-            message_output[field_key] = outputs
-            return message_output, mut_fielddef
-        except DecoderException:
-            continue
+        field_key = output_fielddef.field_key(alt_type_id)
+        output_message_binary = {field_key: outputs}  # type: Message
 
-    # This should never happen, we should always be able to use bytes
-    raise DecoderException("Unable to decode field with typedef", path=path)
+        return output_message_binary, output_fielddef
+
+    except DecoderException:
+        # The decoder failed for at least one field, try the next decoder
+        pass
+
+    # Step 3.3: Fall back to bytes as last resort
+    # In most cases, bytes will already by tested via
+    # `config.default_binary_type`
+    outputs_bytes = []  # type: List[bytes]
+    for field_start in field_starts:
+        output_bytes, _ = decode_bytes(buf, field_start)
+        outputs_bytes.append(output_bytes)
+    output_fielddef = fielddef.make_mutable()
+    alt_type_id = output_fielddef.add_type("bytes")
+
+    field_key = output_fielddef.field_key(alt_type_id)
+    message_output_bytes = {field_key: outputs_bytes}  # type: Message
+
+    return message_output_bytes, output_fielddef
 
 
 def encode_lendelim_message(data, config, typedef, path=None, field_order=None):

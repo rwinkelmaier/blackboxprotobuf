@@ -269,6 +269,15 @@ class FieldDef(object):
             field_types["0"] = self.resolve_message_type_name(config, field_path)
         return field_types
 
+    def alt_id_for_type(self, field_type):
+        # type: (FieldDef, str) -> Optional[str]
+        # Check if we already have a type and return it's alt_id
+        # Return None if the type isn't in _types
+        for alt_id, alt_type in self._types.items():
+            if not isinstance(alt_type, TypeDef) and field_type == alt_type:
+                return alt_id
+        return None
+
 
 class MutableFieldDef(FieldDef):
     def set_field_order(self, field_order):
@@ -289,6 +298,10 @@ class MutableFieldDef(FieldDef):
 
     def add_type(self, field_type):
         # type: (MutableFieldDef, str | TypeDef) -> str
-        alt_type_id = self.next_alt_type_id()
-        self.set_type(alt_type_id, field_type)
+        alt_type_id = None
+        if not isinstance(field_type, TypeDef):
+            alt_type_id = self.alt_id_for_type(field_type)
+        if alt_type_id is None:
+            alt_type_id = self.next_alt_type_id()
+            self.set_type(alt_type_id, field_type)
         return alt_type_id

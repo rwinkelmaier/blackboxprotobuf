@@ -210,7 +210,7 @@ def _encode_message_field(config, typedef, path, field_id, value):
     # type: (Config, TypeDef, List[str], str | int, Any) -> Tuple[str, List[Tuple[ByteString, ByteString]]]
 
     if not isinstance(field_id, six.text_type):
-        field_key = six.ensure_text(str(field_id))  # type: str
+        field_key = six.text_type(field_id)  # type: str
     else:
         field_key = field_id
 
@@ -418,7 +418,7 @@ def _simplify_output(output, seen_repeated):
             field_name = (
                 field_key.split(six.u("-"), 1)[0]
                 if isinstance(field_key, six.string_types)
-                else six.ensure_text(str(field_key))
+                else six.text_type(field_key)
             )
             if not seen_repeated[field_name]:
                 output[field_key] = field_outputs[0]
@@ -448,7 +448,7 @@ def _group_by_number(buf, pos, end, path):
             )
 
         # We want field numbers as strings everywhere
-        field_id = six.ensure_text(str(field_number))
+        field_id = six.text_type(field_number)
 
         field_path = path[:] + [field_id]
 

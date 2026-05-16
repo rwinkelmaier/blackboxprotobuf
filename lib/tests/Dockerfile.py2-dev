@@ -5,7 +5,9 @@ FROM python:2.7
 
 WORKDIR /app/lib
 
-RUN apt update && \
+RUN sed -i 's|deb.debian.org|archive.debian.org|g' /etc/apt/sources.list && \
+    sed -i '/security.debian.org/d' /etc/apt/sources.list && \
+    apt update && \
     apt install -y protobuf-compiler
 
 COPY tests/requirements-python2-dev.txt ./

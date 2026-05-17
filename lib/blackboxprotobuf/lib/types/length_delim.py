@@ -36,10 +36,10 @@ from blackboxprotobuf.lib.exceptions import (
     BlackboxProtobufException,
 )
 from blackboxprotobuf.lib.typedef import (
+    _ImmutableTypeDef,
     TypeDef,
-    MutableTypeDef,
+    _ImmutableFieldDef,
     FieldDef,
-    MutableFieldDef,
 )
 
 if six.PY3:
@@ -171,8 +171,7 @@ def encode_message(data, config, typedef, path=None, field_order=None):
 
     if output_len > 0:
         if (
-            config.preserve_field_order
-            and field_order is not None
+            field_order is not None
             and len(field_order) == output_len
         ):
             # check for old typedefs which had field_order as a tuple
@@ -279,7 +278,7 @@ def _encode_message_field(config, typedef, path, field_id, value):
 
 
 def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=None):
-    # type: (bytes, Config, Optional[TypeDef], int, Optional[int], int, Optional[List[str]]) -> Tuple[Message, TypeDef, List[str], int]
+    # type: (bytes, Config, Optional[_ImmutableTypeDef], int, Optional[int], int, Optional[List[str]]) -> Tuple[Message, TypeDef, List[str], int]
     """Decode a protobuf message with no length prefix"""
     if end is None:
         end = len(buf)
@@ -344,7 +343,7 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
 
 
 def _decode_standard_field(buf, wire_type, field_starts, fielddef, config, field_path):
-    # type: (bytes, int, List[int], FieldDef, Config, List[str]) -> Tuple[List[Any], MutableFieldDef, str]
+    # type: (bytes, int, List[int], _ImmutableFieldDef, Config, List[str]) -> Tuple[List[Any], FieldDef, str]
     field_outputs = None
     field_alt_type_id = None
     for alt_type_id, field_type in fielddef.resolve_types(config, field_path).items():
@@ -523,7 +522,7 @@ _is_printable = (
 
 
 def _try_decode_lendelim_fields(buf, field_starts, fielddef, config, path):
-    # type: (bytes, List[int], FieldDef, Config, List[str]) -> Tuple[Message, MutableFieldDef]
+    # type: (bytes, List[int], _ImmutableFieldDef, Config, List[str]) -> Tuple[Message, FieldDef]
 
     # Goals:
     #   Try to enforce a consistent type (but not typedef) across all fields we know about
@@ -687,7 +686,7 @@ def encode_lendelim_message(data, config, typedef, path=None, field_order=None):
 
 
 def decode_lendelim_message(buf, config, typedef=None, pos=0, depth=0, path=None):
-    # type: (bytes, Config, Optional[TypeDef], int, int, Optional[List[str]]) -> Tuple[Message, TypeDef, List[str], int]
+    # type: (bytes, Config, Optional[_ImmutableTypeDef], int, int, Optional[List[str]]) -> Tuple[Message, TypeDef, List[str], int]
     """Deocde a length delimited protobuf message from buf"""
     length, pos = varint.decode_uvarint(buf, pos)
     end = pos + length

@@ -8,8 +8,8 @@ def test_wide():
 
     message = {"1": [1] * 10000000}
 
-    encoded = blackboxprotobuf.lib.encode_message(message, typedef)
-    decoded, _ = blackboxprotobuf.lib.decode_message(encoded, typedef)
+    encoded = blackboxprotobuf.encode(message, typedef, encoding="none")
+    decoded = blackboxprotobuf.decode(encoded, typedef, encoding="none").message
 
 
 @pytest.mark.skip()
@@ -32,8 +32,8 @@ def test_deep():
 
         target_depth -= 1
 
-    encoded = blackboxprotobuf.lib.encode_message(message, typedef, config)
-    decoded, _ = blackboxprotobuf.lib.decode_message(encoded, typedef, config)
+    encoded = blackboxprotobuf.encode(message, typedef, encoding="none", config=config)
+    decoded = blackboxprotobuf.decode(encoded, typedef, encoding="none", config=config).message
 
 
 @pytest.mark.skip()
@@ -56,8 +56,8 @@ def test_large_multilayer():
 
         target_depth -= 1
 
-    encoded = blackboxprotobuf.lib.encode_message(message, typedef, config)
-    decoded, _ = blackboxprotobuf.lib.decode_message(encoded, typedef, config)
+    encoded = blackboxprotobuf.encode(message, typedef, encoding="none", config=config)
+    decoded = blackboxprotobuf.decode(encoded, typedef, encoding="none", config=config).message
 
 
 @pytest.mark.skip()
@@ -73,14 +73,14 @@ def test_uint_message_perf():
     import timeit
 
     time_taken = timeit.timeit(
-        lambda: blackboxprotobuf.lib.encode_message(message, typedef, config),
+        lambda: blackboxprotobuf.encode(message, typedef, encoding="none", config=config),
         number=100000,
     )
     print("Encoding took {:.4f} seconds".format(time_taken))
 
-    payload = blackboxprotobuf.lib.encode_message(message, typedef, config)
+    payload = blackboxprotobuf.encode(message, typedef, encoding="none", config=config)
     time_taken = timeit.timeit(
-        lambda: blackboxprotobuf.lib.decode_message(payload, typedef, config),
+        lambda: blackboxprotobuf.decode(payload, typedef, encoding="none", config=config),
         number=100000,
     )
     print("Decoding took {:.4f} seconds".format(time_taken))

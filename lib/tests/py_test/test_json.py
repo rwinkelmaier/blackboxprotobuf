@@ -40,17 +40,17 @@ def test_message_json_inverse(x):
     config = Config()
     typedef, message = x
     encoded = length_delim.encode_message(message, config, TypeDef.from_dict(typedef))
-    decoded_json, typedef_out = blackboxprotobuf.protobuf_to_json(
-        encoded, config=config, message_type=typedef
-    )
+    result = blackboxprotobuf.decode_to_json(encoded, typedef, encoding="none", config=config)
+    decoded_json = result.message_json
+    typedef_out = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_out)
-    encoded_json = blackboxprotobuf.protobuf_from_json(
-        decoded_json, config=config, message_type=typedef_out
+    encoded_json = blackboxprotobuf.encode_from_json(
+        decoded_json, typedef_out, encoding="none", config=config
     )
-    assert not isinstance(encoded_json, list)
-    decoded, typedef_out = blackboxprotobuf.decode_message(
-        encoded_json, config=config, message_type=typedef
-    )
+    assert isinstance(encoded_json, bytes)
+    result2 = blackboxprotobuf.decode(encoded_json, typedef, encoding="none", config=config)
+    decoded = result2.message
+    typedef_out = result2.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_out)
     assert isinstance(encoded, bytearray)
     assert isinstance(decoded, dict)
@@ -61,17 +61,20 @@ def test_message_json_inverse(x):
 def test_multiple_encoding(x, n):
     config = Config()
     typedef, message = x
-    encoded = length_delim.encode_message(message, config, TypeDef.from_dict(typedef))
+    single_encoded = length_delim.encode_message(message, config, TypeDef.from_dict(typedef))
 
-    bufs = [encoded] * n
-    message_json, typedef_out = blackboxprotobuf.protobuf_to_json(bufs, typedef, config)
-    messages = json.loads(message_json)
+    grpc_data = grpc.encode_grpc([single_encoded] * n)
+    result = blackboxprotobuf.decode_to_json(grpc_data, typedef, encoding="grpc", config=config)
+    messages = json.loads(result.messages_json)
     assert isinstance(messages, list)
     assert len(messages) == n
 
-    encoded2 = blackboxprotobuf.protobuf_from_json(message_json, typedef, config)
-    assert isinstance(encoded2, list)
-    assert len(encoded2) == n
+    encoded2 = blackboxprotobuf.encode_from_json(
+        result.messages_json, typedef, encoding="grpc", config=config
+    )
+    assert isinstance(encoded2, bytes)
+    result2 = blackboxprotobuf.decode_to_json(encoded2, typedef, encoding="grpc", config=config)
+    assert len(json.loads(result2.messages_json)) == n
 
 
 @given(x=strategies.gen_message(anon=True))
@@ -83,21 +86,19 @@ def test_anon_json_decode(x):
     """
     config = Config()
     typedef, message = x
-    encoded = blackboxprotobuf.encode_message(
-        message, config=config, message_type=typedef
-    )
-    decoded_json, typedef_out = blackboxprotobuf.protobuf_to_json(
-        encoded, config=config
-    )
+    encoded = blackboxprotobuf.encode(message, typedef, encoding="none", config=config)
+    result = blackboxprotobuf.decode_to_json(encoded, encoding="none", config=config)
+    decoded_json = result.message_json
+    typedef_out = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_out)
     note("To Json Typedef: %r" % dict(typedef_out))
-    encoded_json = blackboxprotobuf.protobuf_from_json(
-        decoded_json, config=config, message_type=typedef_out
+    encoded_json = blackboxprotobuf.encode_from_json(
+        decoded_json, result.typedef, encoding="none", config=config
     )
-    assert not isinstance(encoded_json, list)
-    decoded, typedef_out = blackboxprotobuf.decode_message(
-        encoded_json, config=config, message_type=typedef
-    )
+    assert isinstance(encoded_json, bytes)
+    result2 = blackboxprotobuf.decode(encoded_json, typedef, encoding="none", config=config)
+    decoded = result2.message
+    typedef_out = result2.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_out)
     note("Original message: %r" % message)
     note("Decoded JSON: %r" % decoded_json)

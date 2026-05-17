@@ -48,12 +48,6 @@ class Config:
         # by default or fixed fields to always be float)
         self.default_types = {}  # type: Dict[int, str]
 
-        # Configure whether bbpb should try to re-encode fields in the same
-        # order they decoded
-        # Field order shouldn't matter for real protobufs, but is there to ensure
-        # that bytes/string are accidentally valid protobufs don't get scrambled
-        # by decoding/re-encoding
-        self.preserve_field_order = True
 
     def get_default_type(self, wiretype):
         # type: (Config, int) -> str

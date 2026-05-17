@@ -236,9 +236,7 @@ def _encode(args, message, typedef, payload_encoding):
     # Re jsonify so that bbpb can fix bytes
     message_json = json.dumps(message)
 
-    protobuf_data = api.protobuf_from_json(message_json, typedef)
-
-    data = payloads.encode_payload(protobuf_data, payload_encoding)
+    data = api.encode_from_json(message_json, typedef, encoding=payload_encoding)
 
     if args.json_protobuf:
         json_out = {
@@ -262,33 +260,12 @@ def _decode(args, data, typedef, payload_encoding):
 
     # args.protobuf_json is already handled
 
-    if payload_encoding:
-        # Use provided payload encoding algorithm
-        protobuf_data, payload_encoding = payloads.decode_payload(
-            data, payload_encoding
-        )
-        message_json, output_typedef = api.protobuf_to_json(protobuf_data, typedef)
-    else:
-        # Have to guess the decoding algorithm
-        decoders = payloads.find_decoders(data)
-
-        for decode in decoders:
-            try:
-                protobuf_data, encoding_alg = decode(data)
-            except BlackboxProtobufException:
-                # The "none" algorithm should always succeed
-                continue
-
-            try:
-                message_json, output_typedef = api.protobuf_to_json(
-                    protobuf_data, typedef
-                )
-                break
-            except BlackboxProtobufException as exc:
-                if encoding_alg == "none":
-                    raise exc
-
-    message = json.loads(message_json)
+    resolve_encoding = payload_encoding if payload_encoding else "auto"
+    result = api.decode_to_json(data, typedef, encoding=resolve_encoding)
+    messages_list = json.loads(result.messages_json)
+    message = messages_list[0] if len(messages_list) == 1 else messages_list
+    output_typedef = result.typedef.to_dict()
+    payload_encoding = result.encoding
 
     if args.output_type:
         output_typedef_data = {}  # type: Dict[str, TypeDefDict | str]

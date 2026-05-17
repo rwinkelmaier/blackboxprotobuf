@@ -29,6 +29,7 @@ import burp
 import copy
 import struct
 import blackboxprotobuf
+from blackboxprotobuf import decode_to_json, encode_from_json
 from javax.swing import JSplitPane, JPanel, JButton, BoxLayout, JOptionPane
 from javax.swing import (
     Box,
@@ -132,8 +133,8 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         success = False
         try:
             json_data = self._text_editor.getText().tostring()
-            protobuf_data = blackboxprotobuf.protobuf_from_json(
-                json_data, self._last_good.typedef
+            protobuf_data = encode_from_json(
+                json_data, self._last_good.typedef, encoding="none"
             )
 
             success = True
@@ -145,8 +146,8 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
 
         if not success:
             try:
-                protobuf_data = blackboxprotobuf.protobuf_from_json(
-                    self._last_good.message, self._last_good.typedef
+                protobuf_data = encode_from_json(
+                    self._last_good.message, self._last_good.typedef, encoding="none"
                 )
 
                 # Put the error here so that we only have one error to the user if the above encoding doesn't work
@@ -180,9 +181,9 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         Sets the protobuf message for the editor.
         """
         try:
-            json_data, message_type = blackboxprotobuf.protobuf_to_json(
-                protobuf_data, message_type_in
-            )
+            result = decode_to_json(protobuf_data, message_type_in, encoding="none")
+            json_data = result.message_json
+            message_type = result.typedef.to_dict()
 
             self._last_good = LastGoodData(json_data, message_type, typedef_source)
             self._filtered_message_model.set_new_data(protobuf_data)
@@ -408,7 +409,7 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         try:
             json_data = self._text_editor.getText().tostring()
             typedef = self._last_good.typedef
-            protobuf_data = blackboxprotobuf.protobuf_from_json(json_data, typedef)
+            protobuf_data = encode_from_json(json_data, typedef, encoding="none")
             # If it works, save the message
             # Don't need to save typeddef because we're using the one from lastgood
             self._last_good.message = json_data
@@ -523,12 +524,12 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         old_typedef = self._last_good.typedef
         json_data = self._text_editor.getText().tostring()
 
-        protobuf_data = blackboxprotobuf.protobuf_from_json(json_data, old_typedef)
+        protobuf_data = encode_from_json(json_data, old_typedef, encoding="none")
         self._payload_info.protobuf_data = protobuf_data
 
-        new_json, new_typedef = blackboxprotobuf.protobuf_to_json(
-            protobuf_data, typedef
-        )
+        result = decode_to_json(protobuf_data, typedef, encoding="none")
+        new_json = result.message_json
+        new_typedef = result.typedef.to_dict()
 
         self._last_good = LastGoodData(new_json, new_typedef, source)
 
@@ -759,7 +760,7 @@ class FilteredMessageModel(ListModel, ListDataListener):
             return False
         typedef = default_config.known_types[typename]
         try:
-            _, _ = blackboxprotobuf.protobuf_to_json(self._data, typedef)
+            decode_to_json(self._data, typedef, encoding="none")
         except BlackboxProtobufException as exc:
             self._callbacks.printError(traceback.format_exc())
             self._rejected_types.add(typename)

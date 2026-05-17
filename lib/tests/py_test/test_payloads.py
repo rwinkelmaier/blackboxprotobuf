@@ -131,29 +131,25 @@ def test_wrapped_message(x, chosen_encoding):
     config = Config()
 
     original_typedef, message = x
-    protobuf_data = blackboxprotobuf.encode_message(message, original_typedef, config)
+    protobuf_data = blackboxprotobuf.encode(message, original_typedef, encoding="none", config=config)
     data = payloads.encode_payload(protobuf_data, chosen_encoding)
 
-    messages, typedef, encoding = blackboxprotobuf.decode_wrapped_message(
-        data, encoding=chosen_encoding, config=config
-    )
-    assert encoding == chosen_encoding
+    result = blackboxprotobuf.decode(data, encoding=chosen_encoding, config=config)
+    assert result.encoding == chosen_encoding
 
-    messages, typedef, encoding = blackboxprotobuf.decode_wrapped_message(
-        data, config=config
-    )
-    assert encoding == chosen_encoding
+    result = blackboxprotobuf.decode(data, config=config)
+    assert result.encoding == chosen_encoding
 
-    payload = blackboxprotobuf.encode_wrapped_message(
-        messages, typedef, encoding, config
+    payload = blackboxprotobuf.encode(
+        result.messages, result.typedef, encoding=result.encoding, config=config
     )
     assert isinstance(payload, bytes)
 
-    new_protobuf_data, encoding = payloads.decode_payload(payload, chosen_encoding)
+    new_protobuf_data, _ = payloads.decode_payload(payload, chosen_encoding)
     # can't check against protobuf_data because of field ordering
-    new_message, _ = blackboxprotobuf.decode_message(
-        new_protobuf_data[0], original_typedef, config
-    )
+    new_message = blackboxprotobuf.decode(
+        new_protobuf_data[0], original_typedef, encoding="none", config=config
+    ).message
     assert message == new_message
 
 
@@ -165,27 +161,23 @@ def test_wrapped_message_json(x, chosen_encoding):
     config = Config()
 
     original_typedef, message = x
-    protobuf_data = blackboxprotobuf.encode_message(message, original_typedef, config)
+    protobuf_data = blackboxprotobuf.encode(message, original_typedef, encoding="none", config=config)
     data = payloads.encode_payload(protobuf_data, chosen_encoding)
 
-    messages, typedef, encoding = blackboxprotobuf.wrapped_protobuf_to_json(
-        data, encoding=chosen_encoding, config=config
-    )
-    assert encoding == chosen_encoding
+    result = blackboxprotobuf.decode_to_json(data, encoding=chosen_encoding, config=config)
+    assert result.encoding == chosen_encoding
 
-    messages, typedef, encoding = blackboxprotobuf.wrapped_protobuf_to_json(
-        data, config=config
-    )
-    assert encoding == chosen_encoding
+    result = blackboxprotobuf.decode_to_json(data, config=config)
+    assert result.encoding == chosen_encoding
 
-    payload = blackboxprotobuf.wrapped_protobuf_from_json(
-        messages, typedef, encoding, config
+    payload = blackboxprotobuf.encode_from_json(
+        result.messages_json, result.typedef, encoding=result.encoding, config=config
     )
     assert isinstance(payload, bytes)
 
-    new_protobuf_data, encoding = payloads.decode_payload(payload, chosen_encoding)
+    new_protobuf_data, _ = payloads.decode_payload(payload, chosen_encoding)
     # can't check against protobuf_data because of field ordering
-    new_message, _ = blackboxprotobuf.decode_message(
-        new_protobuf_data[0], original_typedef, config
-    )
+    new_message = blackboxprotobuf.decode(
+        new_protobuf_data[0], original_typedef, encoding="none", config=config
+    ).message
     assert message == new_message

@@ -39,6 +39,7 @@ except ModuleNotFoundError:
 
 from blackboxprotobuf.lib import payloads
 from blackboxprotobuf.lib.exceptions import BlackboxProtobufException
+from blackboxprotobuf import decode_to_json, encode_from_json, TypeDef
 
 import json
 from collections.abc import Sequence
@@ -151,10 +152,7 @@ class BlackboxProtobufAddon:
         )
 
         def message_callback(edited_json: str) -> None:
-            protobuf_data = blackboxprotobuf.protobuf_from_json(
-                edited_json, typedef_out
-            )
-            data = payloads.encode_payload(protobuf_data, encoding_alg)
+            data = encode_from_json(edited_json, typedef_out, encoding=encoding_alg)
             message.content = bytes(data)
             self._refresh_view()
 
@@ -175,7 +173,7 @@ class BlackboxProtobufAddon:
                 new_typedef, typedef
             )  # Validate against old typedef
 
-            blackboxprotobuf.lib.api._strip_typedef_annotations(new_typedef)
+            new_typedef = TypeDef.from_dict(new_typedef).to_dict()
             known_type = self.typedef_lookup.get(message_hash)
             if isinstance(known_type, str):
                 # This is a named typedef, edit the known typedef instead of the saved value
@@ -284,7 +282,7 @@ class BlackboxProtobufAddon:
             raise exceptions.CommandError(f"Error: Typename {typename} is not valid.")
         typedef, message_hash = self._resolve_type(flow_part)
 
-        blackboxprotobuf.lib.api._strip_typedef_annotations(typedef)
+        typedef = TypeDef.from_dict(typedef).to_dict()
         self.typedef_lookup[message_hash] = typename
         self.bbpb_config.known_types[typename] = typedef
         self._save_project_file()
@@ -525,31 +523,14 @@ def _message_hash(
 
 def _decode_protobuf(data, typedef, config, fallback=True):
     try:
-        decoders = payloads.find_decoders(data)
-        for decoder in decoders:
-            try:
-                protobuf_data, encoding_alg = decoder(data)
-            except BlackboxProtobufException:
-                continue
-
-            try:
-                message, typedef_out = blackboxprotobuf.lib.protobuf_to_json(
-                    protobuf_data, typedef, config=config
-                )
-
-                return message, typedef_out, encoding_alg
-            except BlackboxProtobufException as exc:
-                if encoding_alg == "none":
-                    raise exc
-                continue
+        result = decode_to_json(data, typedef, encoding="auto", config=config)
+        typedef_out = result.typedef.to_dict()
+        return result.messages_json, typedef_out, result.encoding
     except BlackboxProtobufException as exc:
         if typedef and fallback:
             return _decode_protobuf(data, {}, config)
         else:
             raise exc
-    raise BlackboxProtobufException(
-        'Failed to decode protobuf, but did not catch "none" decoder. This should never be hit'
-    )
 
 
 # This function spawns an editor for a text file. Once the file is saved, it

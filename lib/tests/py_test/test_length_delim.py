@@ -314,17 +314,17 @@ def test_message_ordering(x, rng):
     )
 
     # now we have bytes that could be decoded as a message, we don't care what the original typedef is
+    # Use the TypeDef object directly (not to_dict()) so field_order is preserved
     decoded_message, typedef, _, _ = length_delim.decode_message(
         message_bytes, config, TypeDef()
     )
-    typedef = typedef.to_dict()
 
     message_items = list(decoded_message["1"].items())
     rng.shuffle(message_items)
     decoded_message["1"] = collections.OrderedDict(message_items)
 
     new_message_bytes = length_delim.encode_message(
-        decoded_message, config, TypeDef.from_dict(typedef)
+        decoded_message, config, typedef
     )
 
     assert message_bytes == new_message_bytes

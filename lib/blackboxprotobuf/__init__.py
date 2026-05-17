@@ -30,4 +30,21 @@ This module is split into two submodules:
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from blackboxprotobuf.lib.api import *
+from blackboxprotobuf.lib.api import (
+    decode,
+    encode,
+    decode_to_json,
+    encode_from_json,
+    TypeDef,
+    FieldDef,
+    DecodeResult,
+    JSONDecodeResult,
+    validate_typedef,
+    sort_typedef,
+    export_protofile,
+    import_protofile,
+    BlackboxProtobufException,
+    TypedefException,
+    EncoderException,
+    DecoderException,
+)

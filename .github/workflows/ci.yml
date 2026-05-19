@@ -22,7 +22,8 @@ jobs:
         working-directory: lib
         run: |
           poetry install --with dev
-          apt install -y protobuf-compiler
+          sudo apt update
+          sudo apt install -y protobuf-compiler
       - name: Run pytest
         working-directory: lib
         run: poetry run python -m pytest tests/py_test/
@@ -44,7 +45,7 @@ jobs:
             bash -c "
               sed -i 's|deb.debian.org|archive.debian.org|g' /etc/apt/sources.list && \
               sed -i '/security.debian.org/d' /etc/apt/sources.list && \
-              apt update -y &&
+              apt update &&
               apt install -y protobuf-compiler &&
               pip install -r tests/requirements-python2-dev.txt &&
               python -m pytest tests/py_test/ -v

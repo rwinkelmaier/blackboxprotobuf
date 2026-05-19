@@ -1,4 +1,5 @@
-name: CI on: pull_request
+name: CI
+on: pull_request
 jobs:
   test-py3:
     name: pytest 3.8

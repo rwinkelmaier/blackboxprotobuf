@@ -22,7 +22,7 @@ jobs:
         working-directory: lib
         run: |
           poetry install --with dev
-
+          apt install -y protobuf-compiler
       - name: Run pytest
         working-directory: lib
         run: poetry run python -m pytest tests/py_test/

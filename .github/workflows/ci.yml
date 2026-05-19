@@ -1,0 +1,80 @@
+name: CI
+on: pull_request
+jobs:
+  test-py3:
+    name: pytest 3.8
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Set up Poetry
+        run: pipx install poetry
+
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.8
+          cache: poetry
+          cache-dependency-path: lib/pyproject.toml
+
+      - name: Install dependencies
+        working-directory: lib
+        run: |
+          poetry install --with dev
+          sudo apt update
+          sudo apt install -y protobuf-compiler
+      - name: Run pytest
+        working-directory: lib
+        run: poetry run python -m pytest tests/py_test/
+
+  test-py2:
+    name: pytest (Python 2.7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Run pytest inside Python 2.7 container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/lib \
+            -e PYTHONPATH=/workspace/lib \
+            python:2.7 \
+            bash -c "
+              sed -i 's|deb.debian.org|archive.debian.org|g' /etc/apt/sources.list && \
+              sed -i '/security.debian.org/d' /etc/apt/sources.list && \
+              apt update &&
+              apt install -y protobuf-compiler &&
+              pip install -r tests/requirements-python2-dev.txt &&
+              python -m pytest tests/py_test/ -v
+            "
+
+  lint:
+    name: black + mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Poetry
+        run: pipx install poetry
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: poetry
+          cache-dependency-path: lib/pyproject.toml
+
+      - name: Install dependencies
+        working-directory: lib
+        run: |
+          poetry install --with dev
+          poetry run pip install types-six
+
+      - name: Check formatting with black
+        working-directory: lib
+        run: poetry run black --check --diff .
+
+      - name: Type check with mypy
+        working-directory: lib
+        run: poetry run mypy --strict --disable-bytearray-promotion blackboxprotobuf/

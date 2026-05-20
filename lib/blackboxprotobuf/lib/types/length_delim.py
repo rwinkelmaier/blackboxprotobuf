@@ -37,8 +37,10 @@ from blackboxprotobuf.lib.exceptions import (
 )
 from blackboxprotobuf.lib.typedef import (
     _ImmutableTypeDef,
+    _MutableInternalTypeDef,
     TypeDef,
     _ImmutableFieldDef,
+    _MutableInternalFieldDef,
     FieldDef,
 )
 
@@ -153,7 +155,7 @@ def decode_tag(buf, pos):
 
 
 def encode_message(data, config, typedef, path=None, field_order=None):
-    # type: (Message, Config, TypeDef, Optional[List[str]], Optional[List[str]]) -> bytearray
+    # type: (Message, Config, _ImmutableTypeDef, Optional[List[str]], Optional[List[str]]) -> bytearray
     """Encode a Python dictionary to a binary protobuf message"""
     output = bytearray()
     if path is None:
@@ -203,7 +205,7 @@ def encode_message(data, config, typedef, path=None, field_order=None):
 
 
 def _encode_message_field(config, typedef, path, field_id, value):
-    # type: (Config, TypeDef, List[str], str | int, Any) -> Tuple[str, List[Tuple[ByteString, ByteString]]]
+    # type: (Config, _ImmutableTypeDef, List[str], str | int, Any) -> Tuple[str, List[Tuple[ByteString, ByteString]]]
 
     if not isinstance(field_id, six.text_type):
         field_key = six.text_type(field_id)  # type: str
@@ -232,7 +234,7 @@ def _encode_message_field(config, typedef, path, field_id, value):
         )
 
     field_encoder = None  # type: Callable[[Any], ByteString] | None
-    if isinstance(field_type, TypeDef):
+    if isinstance(field_type, _ImmutableTypeDef):
         field_typedef = field_type
         field_type = "message"
         field_encoder = lambda data: encode_lendelim_message(
@@ -275,7 +277,7 @@ def _encode_message_field(config, typedef, path, field_id, value):
 
 
 def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=None):
-    # type: (bytes, Config, Optional[_ImmutableTypeDef], int, Optional[int], int, Optional[List[str]]) -> Tuple[Message, TypeDef, List[str], int]
+    # type: (bytes, Config, Optional[_ImmutableTypeDef], int, Optional[int], int, Optional[List[str]]) -> Tuple[Message, _MutableInternalTypeDef, List[str], int]
     """Decode a protobuf message with no length prefix"""
     if end is None:
         end = len(buf)
@@ -301,12 +303,11 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
 
         fielddef_pair = mut_typedef.lookup_fielddef_number(
             field_number
-        )  # type: Optional[Tuple[str, FieldDef]]
+        )  # type: Optional[Tuple[str, _ImmutableFieldDef]]
 
-        if fielddef_pair is None:
-            fielddef = FieldDef(field_number)
-        else:
-            fielddef = fielddef_pair[1]
+        fielddef = (
+            FieldDef(field_number) if fielddef_pair is None else fielddef_pair[1]
+        )  # type: _ImmutableFieldDef
 
         # Decode messages (which may have multiple typedefs)  or unknown length delimited fields
         if wire_type == wiretypes.LENGTH_DELIMITED and not isinstance(
@@ -340,11 +341,11 @@ def decode_message(buf, config, typedef=None, pos=0, end=None, depth=0, path=Non
 
 
 def _decode_standard_field(buf, wire_type, field_starts, fielddef, config, field_path):
-    # type: (bytes, int, List[int], _ImmutableFieldDef, Config, List[str]) -> Tuple[List[Any], FieldDef, str]
+    # type: (bytes, int, List[int], _ImmutableFieldDef, Config, List[str]) -> Tuple[List[Any], _MutableInternalFieldDef, str]
     field_outputs = None
     field_alt_type_id = None
     for alt_type_id, field_type in fielddef.resolve_types(config, field_path).items():
-        if isinstance(field_type, TypeDef):
+        if isinstance(field_type, _ImmutableTypeDef):
             # Skip message types
             continue
         if (
@@ -519,7 +520,7 @@ _is_printable = (
 
 
 def _try_decode_lendelim_fields(buf, field_starts, fielddef, config, path):
-    # type: (bytes, List[int], _ImmutableFieldDef, Config, List[str]) -> Tuple[Message, FieldDef]
+    # type: (bytes, List[int], _ImmutableFieldDef, Config, List[str]) -> Tuple[Message, _MutableInternalFieldDef]
 
     # Goals:
     #   Try to enforce a consistent type (but not typedef) across all fields we know about
@@ -530,8 +531,8 @@ def _try_decode_lendelim_fields(buf, field_starts, fielddef, config, path):
     previous_message_types = [
         field_type
         for field_type in fielddef.resolve_types(config, path).items()
-        if isinstance(field_type[1], TypeDef)
-    ]  # type: List[Tuple[str, str | TypeDef]]
+        if isinstance(field_type[1], _ImmutableTypeDef)
+    ]  # type: List[Tuple[str, str | _ImmutableTypeDef]]
 
     # Step 1: Try decoding as printable string based on `isprintable()`. Note that this does not allow whitespace
     string_fields = None  # type: Optional[List[str]]
@@ -569,7 +570,7 @@ def _try_decode_lendelim_fields(buf, field_starts, fielddef, config, path):
             alt_type_id = None
             # Step 2.1 Try decoding with existing message type
             for alt_type_id, field_type in previous_message_types:
-                if not isinstance(field_type, TypeDef):
+                if not isinstance(field_type, _ImmutableTypeDef):
                     # shouldn't happen because we filtered earlier
                     continue
                 try:
@@ -673,7 +674,7 @@ def _try_decode_lendelim_fields(buf, field_starts, fielddef, config, path):
 
 
 def encode_lendelim_message(data, config, typedef, path=None, field_order=None):
-    # type: (Message, Config, TypeDef, Optional[List[str]], Optional[List[str]]) -> ByteString
+    # type: (Message, Config, _ImmutableTypeDef, Optional[List[str]], Optional[List[str]]) -> ByteString
     """Encode data as a length delimited protobuf message"""
     message_out = encode_message(
         data, config, typedef, path=path, field_order=field_order
@@ -683,7 +684,7 @@ def encode_lendelim_message(data, config, typedef, path=None, field_order=None):
 
 
 def decode_lendelim_message(buf, config, typedef=None, pos=0, depth=0, path=None):
-    # type: (bytes, Config, Optional[_ImmutableTypeDef], int, int, Optional[List[str]]) -> Tuple[Message, TypeDef, List[str], int]
+    # type: (bytes, Config, Optional[_ImmutableTypeDef], int, int, Optional[List[str]]) -> Tuple[Message, _MutableInternalTypeDef, List[str], int]
     """Deocde a length delimited protobuf message from buf"""
     length, pos = varint.decode_uvarint(buf, pos)
     end = pos + length

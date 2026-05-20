@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import copy
+
 import six
 from blackboxprotobuf.lib.exceptions import (
     BlackboxProtobufException,
@@ -36,16 +38,36 @@ if six.PY3:
 
 
 # ---------------------------------------------------------------------------
-# _ImmutableTypeDef - read-only base used as the internal decoder parameter type.
-# Decoder functions are typed to accept _ImmutableTypeDef, forcing them to call
-# make_mutable() before writing. Users always hold the mutable TypeDef subclass.
+# Class hierarchy (linear):
+#
+#   _ImmutableTypeDef          read-only base; decoder accepts this as input
+#   └── _MutableInternalTypeDef
+#       │                      decoder-internal mutable view (adds set_fielddef);
+#       │                      indexing still returns _ImmutableFieldDef so the
+#       │                      decoder must call fielddef.make_mutable() before
+#       │                      writing to a field.
+#       └── TypeDef            public user API; narrows reads to FieldDef and adds
+#                              full mutator surface (__setitem__, set_type, ...).
+#
+#   _ImmutableFieldDef
+#   └── _MutableInternalFieldDef
+#       │                      decoder-internal writes (mark_repeated, set_type,
+#       │                      add_type, set_types, set_field_order); inherits
+#       │                      read-only navigation (no property setters).
+#       └── FieldDef           public user API; property setters, __setitem__,
+#                              and __getitem__ that returns FieldDef.
+#
+# make_mutable() on the immutable base produces a _MutableInternal* instance
+# (shallow copy). The api.py boundary converts the decoder's result to public
+# TypeDef/FieldDef via _to_public_typedef, which also isolates the result from
+# the caller's input typedef (deepcopy semantics).
 # ---------------------------------------------------------------------------
 
 
 class _ImmutableTypeDef(object):
     def __init__(self):
         # type: () -> None
-        self._fields = {}  # type: Dict[str, FieldDef]
+        self._fields = {}  # type: Dict[str, _ImmutableFieldDef]
         self._field_names = {}  # type: Dict[str, str]  # name -> field_id
 
     # ------------------------------------------------------------------ #
@@ -130,9 +152,14 @@ class _ImmutableTypeDef(object):
     # ------------------------------------------------------------------ #
 
     def make_mutable(self):
-        # type: () -> TypeDef
-        """Return a shallow mutable copy (copy-on-write pattern for the decoder)."""
-        mutable = TypeDef()
+        # type: () -> _MutableInternalTypeDef
+        """Return a shallow mutable copy for decoder use (copy-on-write).
+
+        The returned _MutableInternalTypeDef has its own _fields dict, but the
+        FieldDef values inside are shared references. Writers must call
+        make_mutable() on each FieldDef before mutating it.
+        """
+        mutable = _MutableInternalTypeDef()
         mutable._fields = self._fields.copy()
         mutable._field_names = self._field_names.copy()
         return mutable
@@ -154,12 +181,28 @@ class _ImmutableTypeDef(object):
 
 
 # ---------------------------------------------------------------------------
-# TypeDef - public mutable type. Extends _ImmutableTypeDef with write methods.
-# Users always receive and manipulate TypeDef objects.
+# _MutableInternalTypeDef - decoder-internal mutable view.
+# Inherits all read methods from _ImmutableTypeDef (so indexing returns the
+# immutable FieldDef view), and adds the single write the decoder needs.
 # ---------------------------------------------------------------------------
 
 
-class TypeDef(_ImmutableTypeDef):
+class _MutableInternalTypeDef(_ImmutableTypeDef):
+    def set_fielddef(self, field_number, fielddef):
+        # type: (str, _ImmutableFieldDef) -> None
+        field_id = six.ensure_text(str(field_number))
+        self._fields[field_id] = fielddef
+        if fielddef._name:
+            self._field_names[fielddef._name] = field_id
+
+
+# ---------------------------------------------------------------------------
+# TypeDef - public user-facing type. Narrows reads to FieldDef and adds the
+# full mutator surface.
+# ---------------------------------------------------------------------------
+
+
+class TypeDef(_MutableInternalTypeDef):
     # ------------------------------------------------------------------ #
     # Serialization (write side)
     # ------------------------------------------------------------------ #
@@ -189,15 +232,49 @@ class TypeDef(_ImmutableTypeDef):
         return typedef
 
     # ------------------------------------------------------------------ #
-    # Mutable mapping interface
+    # Read-side narrowing overrides: TypeDef hands out FieldDef, not the
+    # immutable view, so users can mutate via property setters / __setitem__.
     # ------------------------------------------------------------------ #
 
     def __getitem__(self, field_number):
         # type: (object) -> FieldDef
         field_id = self._resolve_key(field_number)
+        if field_id not in self._fields:
+            raise KeyError(field_number)
+        fd = self._fields[field_id]
+        assert isinstance(fd, FieldDef)
+        return fd
+
+    def items(self):
+        # type: () -> ItemsView[str, FieldDef]
+        # Runtime invariant: TypeDef._fields contains only FieldDef instances.
+        return self._fields.items()  # type: ignore[return-value]
+
+    def values(self):
+        # type: () -> ValuesView[FieldDef]
+        return self._fields.values()  # type: ignore[return-value]
+
+    def lookup_fielddef(self, key):
+        # type: (str) -> Optional[Tuple[str, FieldDef]]
+        field_name = key.split("-", 1)[0]
+        field_id = self._field_names.get(field_name, field_name)
         if field_id in self._fields:
-            return self._fields[field_id]
-        raise KeyError(field_number)
+            fd = self._fields[field_id]
+            assert isinstance(fd, FieldDef)
+            return field_id, fd
+        return None
+
+    def lookup_fielddef_number(self, field_id):
+        # type: (str) -> Optional[Tuple[str, FieldDef]]
+        if field_id in self._fields:
+            fd = self._fields[field_id]
+            assert isinstance(fd, FieldDef)
+            return field_id, fd
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Mutable mapping interface
+    # ------------------------------------------------------------------ #
 
     def __setitem__(self, field_number, value):
         # type: (object, object) -> None
@@ -235,39 +312,6 @@ class TypeDef(_ImmutableTypeDef):
         if fielddef._name:
             self._field_names.pop(fielddef._name, None)
 
-    def items(self):
-        # type: () -> ItemsView[str, FieldDef]
-        return self._fields.items()
-
-    def values(self):
-        # type: () -> ValuesView[FieldDef]
-        return self._fields.values()
-
-    # ------------------------------------------------------------------ #
-    # Internal write method used by the decoder (on mutable copies only)
-    # ------------------------------------------------------------------ #
-
-    def set_fielddef(self, field_number, fielddef):
-        # type: (str, FieldDef) -> None
-        field_id = six.ensure_text(str(field_number))
-        self._fields[field_id] = fielddef
-        if fielddef._name:
-            self._field_names[fielddef._name] = field_id
-
-    def lookup_fielddef(self, key):
-        # type: (str) -> Optional[Tuple[str, FieldDef]]
-        field_name = key.split("-", 1)[0]
-        field_id = self._field_names.get(field_name, field_name)
-        if field_id in self._fields:
-            return field_id, self._fields[field_id]
-        return None
-
-    def lookup_fielddef_number(self, field_id):
-        # type: (str) -> Optional[Tuple[str, FieldDef]]
-        if field_id in self._fields:
-            return field_id, self._fields[field_id]
-        return None
-
     # ------------------------------------------------------------------ #
     # Convenience mutators (public API)
     # ------------------------------------------------------------------ #
@@ -280,7 +324,7 @@ class TypeDef(_ImmutableTypeDef):
     def set_name(self, field_number, name):
         # type: (object, Optional[str]) -> None
         """Rename a field, keeping the name-lookup cache consistent."""
-        field_id = self._normalize_key(field_number)
+        field_id = self._resolve_key(field_number)
         fielddef = self[field_id]
         if fielddef._name:
             self._field_names.pop(fielddef._name, None)
@@ -295,18 +339,19 @@ class TypeDef(_ImmutableTypeDef):
         Supported kwargs: type, name, repeated, message_typedef, type_ref.
         Routing name changes through this method keeps _field_names consistent.
         """
-        field_id = self._normalize_key(field_number)
+        field_id = self._resolve_key(field_number)
+        fielddef = self[field_id]
         for key, value in kwargs.items():
             if key == "name":
                 self.set_name(field_id, value)
             elif key == "type":
-                self[field_id].type = value
+                fielddef.type = value
             elif key == "repeated":
-                self[field_id].repeated = value
+                fielddef.repeated = value
             elif key == "message_typedef":
-                self[field_id].message_typedef = value
+                fielddef.message_typedef = value
             elif key == "type_ref":
-                self[field_id].type_ref = value
+                fielddef.type_ref = value
             else:
                 raise TypeError("Unknown FieldDef attribute: %s" % key)
 
@@ -320,9 +365,7 @@ class TypeDef(_ImmutableTypeDef):
 
 
 # ---------------------------------------------------------------------------
-# _ImmutableFieldDef - read-only base used as the internal decoder parameter
-# type. Decoder functions accept _ImmutableFieldDef and must call make_mutable()
-# to obtain a writable FieldDef before modifying it.
+# _ImmutableFieldDef - read-only base used as the decoder's input type.
 # ---------------------------------------------------------------------------
 
 
@@ -332,8 +375,8 @@ class _ImmutableFieldDef(object):
         self._name = None  # type: Optional[str]
         self._field_id = field_id  # type: str
         self._message_type_name = None  # type: Optional[str]
-        # _types["0"] = primary type (str or TypeDef); "1", "2", ... = alts
-        self._types = {}  # type: Dict[str, Union[str, TypeDef]]
+        # _types["0"] = primary type (str or any TypeDef variant); "1", "2", ... = alts
+        self._types = {}  # type: Dict[str, Union[str, _ImmutableTypeDef]]
         self._example_value = None  # type: Any
         self._seen_repeated = False  # type: bool
         self._field_order = None  # type: Optional[List[str]]
@@ -360,7 +403,7 @@ class _ImmutableFieldDef(object):
             fielddef_dict["seen_repeated"] = self._seen_repeated
 
         field_type = self._types.get("0")
-        if isinstance(field_type, TypeDef):
+        if isinstance(field_type, _ImmutableTypeDef):
             fielddef_dict["type"] = "message"
             fielddef_dict["message_typedef"] = field_type.to_dict()
         elif field_type is not None:
@@ -369,7 +412,9 @@ class _ImmutableFieldDef(object):
         if len(self._types) > 1:
             fielddef_dict["alt_typedefs"] = {
                 alt_num: (
-                    alt_val.to_dict() if isinstance(alt_val, TypeDef) else alt_val
+                    alt_val.to_dict()
+                    if isinstance(alt_val, _ImmutableTypeDef)
+                    else alt_val
                 )
                 for alt_num, alt_val in self._types.items()
                 if alt_num != "0"
@@ -386,7 +431,7 @@ class _ImmutableFieldDef(object):
         # type: () -> Optional[str]
         """The field's primary type name (e.g. 'string', 'int', 'message')."""
         t = self._types.get("0")
-        if isinstance(t, TypeDef):
+        if isinstance(t, _ImmutableTypeDef):
             return "message"
         return t
 
@@ -406,10 +451,10 @@ class _ImmutableFieldDef(object):
 
     @property
     def message_typedef(self):
-        # type: () -> Optional[TypeDef]
+        # type: () -> Optional[_ImmutableTypeDef]
         """The inline sub-typedef for message fields; None for scalar fields."""
         t = self._types.get("0")
-        if isinstance(t, TypeDef):
+        if isinstance(t, _ImmutableTypeDef):
             return t
         return None
 
@@ -424,7 +469,7 @@ class _ImmutableFieldDef(object):
     # ------------------------------------------------------------------ #
 
     def __getitem__(self, field_number):
-        # type: (object) -> FieldDef
+        # type: (object) -> _ImmutableFieldDef
         td = self.message_typedef
         if td is None:
             raise TypeError(
@@ -437,9 +482,9 @@ class _ImmutableFieldDef(object):
     # ------------------------------------------------------------------ #
 
     def make_mutable(self):
-        # type: () -> FieldDef
+        # type: () -> _MutableInternalFieldDef
         """Return a shallow mutable copy for decoder use."""
-        mutable = FieldDef(self._field_id)
+        mutable = _MutableInternalFieldDef(self._field_id)
         mutable._name = self._name
         mutable._message_type_name = self._message_type_name
         mutable._types = self._types.copy()
@@ -449,7 +494,7 @@ class _ImmutableFieldDef(object):
         return mutable
 
     def lookup_field_type(self, key, config, field_path):
-        # type: (str, Config, List[str]) -> Optional[Union[str, TypeDef]]
+        # type: (str, Config, List[str]) -> Optional[Union[str, _ImmutableTypeDef]]
         if "-" in key:
             alt_type_id = key.split("-", 1)[1]
         else:
@@ -457,7 +502,7 @@ class _ImmutableFieldDef(object):
         return self.lookup_field_type_number(alt_type_id, config, field_path)
 
     def lookup_field_type_number(self, alt_type_id, config, field_path):
-        # type: (str, Config, List[str]) -> Optional[Union[str, TypeDef]]
+        # type: (str, Config, List[str]) -> Optional[Union[str, _ImmutableTypeDef]]
         if alt_type_id not in self._types:
             return None
         field_type = self._types[alt_type_id]
@@ -500,7 +545,7 @@ class _ImmutableFieldDef(object):
         return TypeDef.from_dict(config.known_types[self._message_type_name])
 
     def resolve_types(self, config, field_path):
-        # type: (Config, List[str]) -> Dict[str, Union[str, TypeDef]]
+        # type: (Config, List[str]) -> Dict[str, Union[str, _ImmutableTypeDef]]
         field_types = self._types.copy()
         if field_types.get("0") == "message":
             field_types["0"] = self.resolve_message_type_name(config, field_path)
@@ -509,18 +554,53 @@ class _ImmutableFieldDef(object):
     def alt_id_for_type(self, field_type):
         # type: (object) -> Optional[str]
         for alt_id, alt_type in self._types.items():
-            if not isinstance(alt_type, TypeDef) and field_type == alt_type:
+            if not isinstance(alt_type, _ImmutableTypeDef) and field_type == alt_type:
                 return alt_id
         return None
 
 
 # ---------------------------------------------------------------------------
-# FieldDef - public mutable type. Extends _ImmutableFieldDef with property
-# setters and write methods. Users always receive and manipulate FieldDef objects.
+# _MutableInternalFieldDef - decoder-internal writes only.
+# Inherits read-only navigation; adds the named writes the decoder needs.
+# Does NOT have property setters - those live on the public FieldDef subclass.
 # ---------------------------------------------------------------------------
 
 
-class FieldDef(_ImmutableFieldDef):
+class _MutableInternalFieldDef(_ImmutableFieldDef):
+    def set_field_order(self, field_order):
+        # type: (List[str]) -> None
+        self._field_order = field_order
+
+    def mark_repeated(self):
+        # type: () -> None
+        self._seen_repeated = True
+
+    def set_type(self, alt_type_id, field_type):
+        # type: (str, Union[str, _ImmutableTypeDef]) -> None
+        self._types[alt_type_id] = field_type
+
+    def set_types(self, types):
+        # type: (Dict[str, Union[str, _ImmutableTypeDef]]) -> None
+        self._types = types
+
+    def add_type(self, field_type):
+        # type: (Union[str, _ImmutableTypeDef]) -> str
+        alt_type_id = None
+        if not isinstance(field_type, _ImmutableTypeDef):
+            alt_type_id = self.alt_id_for_type(field_type)
+        if alt_type_id is None:
+            alt_type_id = self.next_alt_type_id()
+            self.set_type(alt_type_id, field_type)
+        return alt_type_id
+
+
+# ---------------------------------------------------------------------------
+# FieldDef - public user-facing type. Adds property setters, __setitem__,
+# from_dict, and a __getitem__ override that returns FieldDef.
+# ---------------------------------------------------------------------------
+
+
+class FieldDef(_MutableInternalFieldDef):
     # ------------------------------------------------------------------ #
     # Serialization (write side)
     # ------------------------------------------------------------------ #
@@ -602,14 +682,14 @@ class FieldDef(_ImmutableFieldDef):
     def type(self):
         # type: () -> Optional[str]
         t = self._types.get("0")
-        if isinstance(t, TypeDef):
+        if isinstance(t, _ImmutableTypeDef):
             return "message"
         return t
 
     @type.setter
     def type(self, value):
         # type: (str) -> None
-        if value == "message" and isinstance(self._types.get("0"), TypeDef):
+        if value == "message" and isinstance(self._types.get("0"), _ImmutableTypeDef):
             pass  # preserve existing inline message_typedef
         else:
             self._types["0"] = value
@@ -653,7 +733,7 @@ class FieldDef(_ImmutableFieldDef):
     def message_typedef(self, value):
         # type: (Optional[TypeDef]) -> None
         if value is None:
-            if isinstance(self._types.get("0"), TypeDef):
+            if isinstance(self._types.get("0"), _ImmutableTypeDef):
                 del self._types["0"]
         else:
             self._types["0"] = value
@@ -689,32 +769,39 @@ class FieldDef(_ImmutableFieldDef):
         assert td is not None
         td[field_number] = value
 
-    # ------------------------------------------------------------------ #
-    # Internal write methods used by the decoder (on mutable copies only)
-    # ------------------------------------------------------------------ #
 
-    def set_field_order(self, field_order):
-        # type: (List[str]) -> None
-        self._field_order = field_order
+# ---------------------------------------------------------------------------
+# Boundary conversion: _MutableInternalTypeDef (decoder result) -> TypeDef (public)
+#
+# Walks the decoder's output, allocating new public FieldDef/TypeDef objects.
+# Provides isolation from the caller's input typedef (deepcopy semantics) in
+# one pass; nested message TypeDefs are also re-allocated as public TypeDefs.
+# Runs once per decode() call at the api.py boundary.
+# ---------------------------------------------------------------------------
 
-    def mark_repeated(self):
-        # type: () -> None
-        self._seen_repeated = True
 
-    def set_type(self, alt_type_id, field_type):
-        # type: (str, Union[str, TypeDef]) -> None
-        self._types[alt_type_id] = field_type
+def _to_public_typedef(internal):
+    # type: (_ImmutableTypeDef) -> TypeDef
+    td = TypeDef()
+    for fid, fd in internal._fields.items():
+        td._fields[fid] = _to_public_fielddef(fd)
+    td._field_names = internal._field_names.copy()
+    return td
 
-    def set_types(self, types):
-        # type: (Dict[str, Union[str, TypeDef]]) -> None
-        self._types = types
 
-    def add_type(self, field_type):
-        # type: (Union[str, TypeDef]) -> str
-        alt_type_id = None
-        if not isinstance(field_type, TypeDef):
-            alt_type_id = self.alt_id_for_type(field_type)
-        if alt_type_id is None:
-            alt_type_id = self.next_alt_type_id()
-            self.set_type(alt_type_id, field_type)
-        return alt_type_id
+def _to_public_fielddef(internal):
+    # type: (_ImmutableFieldDef) -> FieldDef
+    fd = FieldDef(internal._field_id)
+    fd._name = internal._name
+    fd._message_type_name = internal._message_type_name
+    fd._seen_repeated = internal._seen_repeated
+    fd._field_order = (
+        list(internal._field_order) if internal._field_order is not None else None
+    )
+    fd._example_value = copy.deepcopy(internal._example_value)
+    for alt_id, t in internal._types.items():
+        if isinstance(t, _ImmutableTypeDef):
+            fd._types[alt_id] = _to_public_typedef(t)
+        else:
+            fd._types[alt_id] = t
+    return fd

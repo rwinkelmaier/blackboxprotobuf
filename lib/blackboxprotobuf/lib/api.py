@@ -51,7 +51,12 @@ from blackboxprotobuf.lib.exceptions import (
     EncoderException,
     DecoderException,
 )
-from blackboxprotobuf.lib.typedef import TypeDef, FieldDef
+from blackboxprotobuf.lib.typedef import (
+    _ImmutableTypeDef,
+    TypeDef,
+    FieldDef,
+    _to_public_typedef,
+)
 from blackboxprotobuf.lib import payloads
 
 __all__ = [
@@ -221,7 +226,7 @@ def decode(data, message_type=None, encoding="auto", config=None):
                 continue
             try:
                 values = []
-                decoder_typedef = typedef
+                decoder_typedef = typedef  # type: _ImmutableTypeDef
                 for protobuf_data in protobuf_datas:
                     (
                         value,
@@ -232,10 +237,11 @@ def decode(data, message_type=None, encoding="auto", config=None):
                         protobuf_data, config, decoder_typedef
                     )
                     values.append(value)
-                annotations = _collect_annotations(decoder_typedef.to_dict(), values[0])
+                public_typedef = _to_public_typedef(decoder_typedef)
+                annotations = _collect_annotations(public_typedef.to_dict(), values[0])
                 return DecodeResult(
                     messages=values,
-                    typedef=decoder_typedef,
+                    typedef=public_typedef,
                     encoding=detected_encoding,
                     annotations=annotations,
                 )
@@ -256,20 +262,22 @@ def decode(data, message_type=None, encoding="auto", config=None):
             data, resolve_encoding
         )
         values = []
+        decoder_typedef = typedef
         for protobuf_data in protobuf_datas:
             (
                 value,
-                typedef,
+                decoder_typedef,
                 _,
                 _,
             ) = blackboxprotobuf.lib.types.length_delim.decode_message(
-                protobuf_data, config, typedef
+                protobuf_data, config, decoder_typedef
             )
             values.append(value)
-        annotations = _collect_annotations(typedef.to_dict(), values[0])
+        public_typedef = _to_public_typedef(decoder_typedef)
+        annotations = _collect_annotations(public_typedef.to_dict(), values[0])
         return DecodeResult(
             messages=values,
-            typedef=typedef,
+            typedef=public_typedef,
             encoding=detected_encoding,
             annotations=annotations,
         )

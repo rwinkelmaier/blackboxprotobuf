@@ -270,6 +270,7 @@ def test_message_guess_inverse(x):
     assert pos == len(encoded)
 
 
+@example(bytes_in=b"\x00\x00\xcd\x01\x00\x00\x00\x00\x00\x00")
 @given(bytes_in=st.binary())
 def test_message_guess_bytes(bytes_in):
     # Test that a given byte array can be decoded anonymously then re-encoded to the same bytes
@@ -286,11 +287,8 @@ def test_message_guess_bytes(bytes_in):
     decoded_message, guessed_typedef, field_order, pos = length_delim.decode_message(
         bytes_in, config, TypeDef()
     )
-    guessed_typedef = guessed_typedef.to_dict()
     assert pos == len(bytes_in)
-    bytes_out = length_delim.encode_message(
-        decoded_message, config, TypeDef.from_dict(guessed_typedef)
-    )
+    bytes_out = length_delim.encode_message(decoded_message, config, guessed_typedef)
     assert bytes_in == bytes_out
 
 

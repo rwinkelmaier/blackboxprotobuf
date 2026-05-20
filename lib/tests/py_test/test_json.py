@@ -44,10 +44,9 @@ def test_message_json_inverse(x):
         encoded, typedef, encoding="none", config=config
     )
     decoded_json = result.message_json
-    typedef_out = result.typedef.to_dict()
-    blackboxprotobuf.validate_typedef(typedef_out)
+    blackboxprotobuf.validate_typedef(result.typedef.to_dict())
     encoded_json = blackboxprotobuf.encode_from_json(
-        decoded_json, typedef_out, encoding="none", config=config
+        decoded_json, result.typedef, encoding="none", config=config
     )
     assert isinstance(encoded_json, bytes)
     result2 = blackboxprotobuf.decode(

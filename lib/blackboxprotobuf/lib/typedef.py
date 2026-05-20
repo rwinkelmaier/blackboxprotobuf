@@ -41,20 +41,20 @@ if six.PY3:
 # Class hierarchy (linear):
 #
 #   _ImmutableTypeDef          read-only base; decoder accepts this as input
-#   └── _MutableInternalTypeDef
-#       │                      decoder-internal mutable view (adds set_fielddef);
-#       │                      indexing still returns _ImmutableFieldDef so the
-#       │                      decoder must call fielddef.make_mutable() before
-#       │                      writing to a field.
-#       └── TypeDef            public user API; narrows reads to FieldDef and adds
+#   +-- _MutableInternalTypeDef
+#       |                      decoder-internal mutable view (adds set_fielddef);
+#       |                      indexing still returns _ImmutableFieldDef so the
+#       |                      decoder must call fielddef.make_mutable() before
+#       |                      writing to a field.
+#       +-- TypeDef            public user API; narrows reads to FieldDef and adds
 #                              full mutator surface (__setitem__, set_type, ...).
 #
 #   _ImmutableFieldDef
-#   └── _MutableInternalFieldDef
-#       │                      decoder-internal writes (mark_repeated, set_type,
-#       │                      add_type, set_types, set_field_order); inherits
-#       │                      read-only navigation (no property setters).
-#       └── FieldDef           public user API; property setters, __setitem__,
+#   +-- _MutableInternalFieldDef
+#       |                      decoder-internal writes (mark_repeated, set_type,
+#       |                      add_type, set_types, set_field_order); inherits
+#       |                      read-only navigation (no property setters).
+#       +-- FieldDef           public user API; property setters, __setitem__,
 #                              and __getitem__ that returns FieldDef.
 #
 # make_mutable() on the immutable base produces a _MutableInternal* instance

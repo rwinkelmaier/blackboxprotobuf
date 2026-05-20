@@ -48,7 +48,6 @@ class Config:
         # by default or fixed fields to always be float)
         self.default_types = {}  # type: Dict[int, str]
 
-
     def get_default_type(self, wiretype):
         # type: (Config, int) -> str
         default_type = self.default_types.get(wiretype, None)

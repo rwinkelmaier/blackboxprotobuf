@@ -170,10 +170,7 @@ def encode_message(data, config, typedef, path=None, field_order=None):
         output_len += len(outputs)
 
     if output_len > 0:
-        if (
-            field_order is not None
-            and len(field_order) == output_len
-        ):
+        if field_order is not None and len(field_order) == output_len:
             # check for old typedefs which had field_order as a tuple
             if isinstance(field_order[0], tuple):
                 field_order = [x[0] for x in field_order]

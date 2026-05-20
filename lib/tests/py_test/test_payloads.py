@@ -131,7 +131,9 @@ def test_wrapped_message(x, chosen_encoding):
     config = Config()
 
     original_typedef, message = x
-    protobuf_data = blackboxprotobuf.encode(message, original_typedef, encoding="none", config=config)
+    protobuf_data = blackboxprotobuf.encode(
+        message, original_typedef, encoding="none", config=config
+    )
     data = payloads.encode_payload(protobuf_data, chosen_encoding)
 
     result = blackboxprotobuf.decode(data, encoding=chosen_encoding, config=config)
@@ -161,10 +163,14 @@ def test_wrapped_message_json(x, chosen_encoding):
     config = Config()
 
     original_typedef, message = x
-    protobuf_data = blackboxprotobuf.encode(message, original_typedef, encoding="none", config=config)
+    protobuf_data = blackboxprotobuf.encode(
+        message, original_typedef, encoding="none", config=config
+    )
     data = payloads.encode_payload(protobuf_data, chosen_encoding)
 
-    result = blackboxprotobuf.decode_to_json(data, encoding=chosen_encoding, config=config)
+    result = blackboxprotobuf.decode_to_json(
+        data, encoding=chosen_encoding, config=config
+    )
     assert result.encoding == chosen_encoding
 
     result = blackboxprotobuf.decode_to_json(data, config=config)

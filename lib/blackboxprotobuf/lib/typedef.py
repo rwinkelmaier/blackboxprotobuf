@@ -41,6 +41,7 @@ if six.PY3:
 # make_mutable() before writing. Users always hold the mutable TypeDef subclass.
 # ---------------------------------------------------------------------------
 
+
 class _ImmutableTypeDef(object):
     def __init__(self):
         # type: () -> None
@@ -59,8 +60,7 @@ class _ImmutableTypeDef(object):
         (field_order) or annotations (example_value_ignored).
         """
         return {
-            field_id: fielddef.to_dict()
-            for field_id, fielddef in self._fields.items()
+            field_id: fielddef.to_dict() for field_id, fielddef in self._fields.items()
         }
 
     # ------------------------------------------------------------------ #
@@ -158,8 +158,8 @@ class _ImmutableTypeDef(object):
 # Users always receive and manipulate TypeDef objects.
 # ---------------------------------------------------------------------------
 
-class TypeDef(_ImmutableTypeDef):
 
+class TypeDef(_ImmutableTypeDef):
     # ------------------------------------------------------------------ #
     # Serialization (write side)
     # ------------------------------------------------------------------ #
@@ -324,6 +324,7 @@ class TypeDef(_ImmutableTypeDef):
 # type. Decoder functions accept _ImmutableFieldDef and must call make_mutable()
 # to obtain a writable FieldDef before modifying it.
 # ---------------------------------------------------------------------------
+
 
 class _ImmutableFieldDef(object):
     def __init__(self, field_id=""):
@@ -518,8 +519,8 @@ class _ImmutableFieldDef(object):
 # setters and write methods. Users always receive and manipulate FieldDef objects.
 # ---------------------------------------------------------------------------
 
-class FieldDef(_ImmutableFieldDef):
 
+class FieldDef(_ImmutableFieldDef):
     # ------------------------------------------------------------------ #
     # Serialization (write side)
     # ------------------------------------------------------------------ #

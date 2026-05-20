@@ -117,12 +117,15 @@ class DecodeResult(_DecodeResultBase):
         """
         if config is None:
             from blackboxprotobuf.lib.config import default as default_config
+
             config = default_config
         out_encoding = encoding if encoding is not None else self.encoding
         encoded = [
-            bytes(blackboxprotobuf.lib.types.length_delim.encode_message(
-                msg, config, self.typedef
-            ))
+            bytes(
+                blackboxprotobuf.lib.types.length_delim.encode_message(
+                    msg, config, self.typedef
+                )
+            )
             for msg in self.messages
         ]
         if len(encoded) == 1 and out_encoding != "grpc":
@@ -160,6 +163,7 @@ class JSONDecodeResult(_JSONDecodeResultBase):
             )
         return json.dumps(parsed[0], indent=2)
 
+
 if six.PY3:
     import typing
 
@@ -168,7 +172,6 @@ if six.PY3:
         from typing import Any, Dict, List, Tuple, Optional, ByteString, Union
         from blackboxprotobuf.lib.pytypes import Message, TypeDefDict, FieldDefDict
         from blackboxprotobuf.lib.config import Config
-
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +305,9 @@ def encode(message, message_type, encoding="none", config=None):
 
     messages = message if isinstance(message, list) else [message]
     encoded = [
-        bytes(blackboxprotobuf.lib.types.length_delim.encode_message(msg, config, typedef))
+        bytes(
+            blackboxprotobuf.lib.types.length_delim.encode_message(msg, config, typedef)
+        )
         for msg in messages
     ]
 
@@ -378,7 +383,9 @@ def encode_from_json(json_str, message_type, encoding="none", config=None):
 
     values = [_json_safe_transform(msg, typedef_dict, True) for msg in values]
     encoded = [
-        bytes(blackboxprotobuf.lib.types.length_delim.encode_message(msg, config, typedef))
+        bytes(
+            blackboxprotobuf.lib.types.length_delim.encode_message(msg, config, typedef)
+        )
         for msg in values
     ]
 
@@ -908,7 +915,6 @@ def sort_typedef(typedef):
             TypeDefDict, output_dict
         )  # Cast because typing doesn't like the ordered dict
     return output_dict
-
 
 
 def _resolve_typedef(message_type, config):

@@ -323,9 +323,7 @@ def test_message_ordering(x, rng):
     rng.shuffle(message_items)
     decoded_message["1"] = collections.OrderedDict(message_items)
 
-    new_message_bytes = length_delim.encode_message(
-        decoded_message, config, typedef
-    )
+    new_message_bytes = length_delim.encode_message(decoded_message, config, typedef)
 
     assert message_bytes == new_message_bytes
 

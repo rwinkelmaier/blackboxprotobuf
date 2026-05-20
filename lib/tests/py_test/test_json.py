@@ -40,7 +40,9 @@ def test_message_json_inverse(x):
     config = Config()
     typedef, message = x
     encoded = length_delim.encode_message(message, config, TypeDef.from_dict(typedef))
-    result = blackboxprotobuf.decode_to_json(encoded, typedef, encoding="none", config=config)
+    result = blackboxprotobuf.decode_to_json(
+        encoded, typedef, encoding="none", config=config
+    )
     decoded_json = result.message_json
     typedef_out = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_out)
@@ -48,7 +50,9 @@ def test_message_json_inverse(x):
         decoded_json, typedef_out, encoding="none", config=config
     )
     assert isinstance(encoded_json, bytes)
-    result2 = blackboxprotobuf.decode(encoded_json, typedef, encoding="none", config=config)
+    result2 = blackboxprotobuf.decode(
+        encoded_json, typedef, encoding="none", config=config
+    )
     decoded = result2.message
     typedef_out = result2.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_out)
@@ -61,10 +65,14 @@ def test_message_json_inverse(x):
 def test_multiple_encoding(x, n):
     config = Config()
     typedef, message = x
-    single_encoded = length_delim.encode_message(message, config, TypeDef.from_dict(typedef))
+    single_encoded = length_delim.encode_message(
+        message, config, TypeDef.from_dict(typedef)
+    )
 
     grpc_data = grpc.encode_grpc([single_encoded] * n)
-    result = blackboxprotobuf.decode_to_json(grpc_data, typedef, encoding="grpc", config=config)
+    result = blackboxprotobuf.decode_to_json(
+        grpc_data, typedef, encoding="grpc", config=config
+    )
     messages = json.loads(result.messages_json)
     assert isinstance(messages, list)
     assert len(messages) == n
@@ -73,7 +81,9 @@ def test_multiple_encoding(x, n):
         result.messages_json, typedef, encoding="grpc", config=config
     )
     assert isinstance(encoded2, bytes)
-    result2 = blackboxprotobuf.decode_to_json(encoded2, typedef, encoding="grpc", config=config)
+    result2 = blackboxprotobuf.decode_to_json(
+        encoded2, typedef, encoding="grpc", config=config
+    )
     assert len(json.loads(result2.messages_json)) == n
 
 
@@ -96,7 +106,9 @@ def test_anon_json_decode(x):
         decoded_json, result.typedef, encoding="none", config=config
     )
     assert isinstance(encoded_json, bytes)
-    result2 = blackboxprotobuf.decode(encoded_json, typedef, encoding="none", config=config)
+    result2 = blackboxprotobuf.decode(
+        encoded_json, typedef, encoding="none", config=config
+    )
     decoded = result2.message
     typedef_out = result2.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_out)

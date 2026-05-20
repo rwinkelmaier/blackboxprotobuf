@@ -151,7 +151,9 @@ def test_decode_json(x):
         setattr(message, key, value)
     encoded = message.SerializeToString()
 
-    result = blackboxprotobuf.decode_to_json(encoded, testMessage_typedef, encoding="none")
+    result = blackboxprotobuf.decode_to_json(
+        encoded, testMessage_typedef, encoding="none"
+    )
     decoded_json = result.message_json
     typedef_json = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_json)
@@ -170,10 +172,14 @@ def test_encode_json(x):
         x["testBytes"] = x["testBytes"].decode("latin1")
     json_str = json.dumps(x)
 
-    encoded = blackboxprotobuf.encode_from_json(json_str, testMessage_typedef, encoding="none")
+    encoded = blackboxprotobuf.encode_from_json(
+        json_str, testMessage_typedef, encoding="none"
+    )
     assert isinstance(encoded, bytes)
 
-    test_decode = blackboxprotobuf.decode(encoded, testMessage_typedef, encoding="none").message
+    test_decode = blackboxprotobuf.decode(
+        encoded, testMessage_typedef, encoding="none"
+    ).message
 
     message = Test_pb2.TestMessage()
     message.ParseFromString(encoded)
@@ -194,7 +200,9 @@ def test_modify_json(x, modify_num):
     for key, value in x.items():
         setattr(message, key, value)
     encoded = message.SerializeToString()
-    result = blackboxprotobuf.decode_to_json(encoded, testMessage_typedef, encoding="none")
+    result = blackboxprotobuf.decode_to_json(
+        encoded, testMessage_typedef, encoding="none"
+    )
     decoded_json = result.message_json
     typedef = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef)

@@ -189,13 +189,13 @@ def decode(data, message_type=None, encoding="auto", config=None):
 
     Args:
         data: bytes containing the (optionally wrapped) protobuf payload.
-        message_type: Optional typedef hint — a TypeDef, a dict in typedef
+        message_type: Optional typedef hint - a TypeDef, a dict in typedef
             format, a known-type name string, or None to auto-detect.
         encoding: Outer wrapping to strip before decoding the protobuf bytes.
-            "auto" (default) — try each algorithm in order.
-            "none"           — raw protobuf bytes.
-            "gzip"           — gzip-compressed single message.
-            "grpc"           — gRPC framing (may contain multiple messages).
+            "auto" (default) - try each algorithm in order.
+            "none"           - raw protobuf bytes.
+            "gzip"           - gzip-compressed single message.
+            "grpc"           - gRPC framing (may contain multiple messages).
         config: Optional Config object. Defaults to the global default.
     Returns:
         DecodeResult with .messages (list), .typedef (TypeDef), .encoding,
@@ -286,9 +286,9 @@ def encode(message, message_type, encoding="none", config=None):
         message: A single message dict, or a list of message dicts (for grpc).
         message_type: TypeDef, dict typedef, or known-type name string.
         encoding: Outer wrapping to apply after encoding.
-            "none" (default) — raw protobuf bytes.
-            "gzip"           — gzip-compressed single message.
-            "grpc"           — gRPC framing.
+            "none" (default) - raw protobuf bytes.
+            "gzip"           - gzip-compressed single message.
+            "grpc"           - gRPC framing.
         config: Optional Config object. Defaults to the global default.
     Returns:
         Encoded bytes with the outer encoding applied.

@@ -36,7 +36,7 @@ if six.PY3:
 
 
 # ---------------------------------------------------------------------------
-# _ImmutableTypeDef — read-only base used as the internal decoder parameter type.
+# _ImmutableTypeDef - read-only base used as the internal decoder parameter type.
 # Decoder functions are typed to accept _ImmutableTypeDef, forcing them to call
 # make_mutable() before writing. Users always hold the mutable TypeDef subclass.
 # ---------------------------------------------------------------------------
@@ -154,7 +154,7 @@ class _ImmutableTypeDef(object):
 
 
 # ---------------------------------------------------------------------------
-# TypeDef — public mutable type. Extends _ImmutableTypeDef with write methods.
+# TypeDef - public mutable type. Extends _ImmutableTypeDef with write methods.
 # Users always receive and manipulate TypeDef objects.
 # ---------------------------------------------------------------------------
 
@@ -175,7 +175,7 @@ class TypeDef(_ImmutableTypeDef):
         Integer field-number keys are coerced to strings.
         String shorthand values (e.g. "string") expand to {"type": "string"}.
         Legacy state fields (field_order, example_value_ignored) are silently
-        ignored — they are internal decoder state, not persisted schema.
+        ignored - they are internal decoder state, not persisted schema.
         """
         typedef = TypeDef()
         for field_id, fielddef_dict in typedef_dict.items():
@@ -320,7 +320,7 @@ class TypeDef(_ImmutableTypeDef):
 
 
 # ---------------------------------------------------------------------------
-# _ImmutableFieldDef — read-only base used as the internal decoder parameter
+# _ImmutableFieldDef - read-only base used as the internal decoder parameter
 # type. Decoder functions accept _ImmutableFieldDef and must call make_mutable()
 # to obtain a writable FieldDef before modifying it.
 # ---------------------------------------------------------------------------
@@ -348,7 +348,7 @@ class _ImmutableFieldDef(object):
 
         Emits the legacy key names (message_typedef, alt_typedefs,
         message_type_name, seen_repeated) for compatibility with existing
-        consumers. Does NOT emit field_order — that is internal decoder state
+        consumers. Does NOT emit field_order - that is internal decoder state
         embedded in the TypeDef object and not persisted across serialization.
         """
         fielddef_dict = {}  # type: Dict[str, Any]
@@ -515,7 +515,7 @@ class _ImmutableFieldDef(object):
 
 
 # ---------------------------------------------------------------------------
-# FieldDef — public mutable type. Extends _ImmutableFieldDef with property
+# FieldDef - public mutable type. Extends _ImmutableFieldDef with property
 # setters and write methods. Users always receive and manipulate FieldDef objects.
 # ---------------------------------------------------------------------------
 

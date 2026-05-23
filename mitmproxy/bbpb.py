@@ -525,6 +525,8 @@ def _decode_protobuf(data, typedef, config, fallback=True):
     try:
         result = decode_to_json(data, typedef, encoding="auto", config=config)
         typedef_out = result.typedef.to_dict()
+        if result.encoding != "grpc" and len(json.loads(result.messages_json)) == 1:
+            return result.message_json, typedef_out, result.encoding
         return result.messages_json, typedef_out, result.encoding
     except BlackboxProtobufException as exc:
         if typedef and fallback:

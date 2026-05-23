@@ -125,6 +125,11 @@ class DecodeResult(_DecodeResultBase):
 
             config = default_config
         out_encoding = encoding if encoding is not None else self.encoding
+        if len(self.messages) > 1 and out_encoding != "grpc":
+            raise EncoderException(
+                "Cannot encode %d messages with encoding=%r; only 'grpc' supports multiple messages"
+                % (len(self.messages), out_encoding)
+            )
         encoded = [
             bytes(
                 blackboxprotobuf.lib.types.length_delim.encode_message(
@@ -133,13 +138,14 @@ class DecodeResult(_DecodeResultBase):
             )
             for msg in self.messages
         ]
-        if len(encoded) == 1 and out_encoding != "grpc":
+        if out_encoding != "grpc":
             return payloads.encode_payload(encoded[0], out_encoding)
         return payloads.encode_payload(encoded, out_encoding)
 
 
 _JSONDecodeResultBase = collections.namedtuple(  # type: ignore[name-match]
-    "JSONDecodeResult", ["messages_json", "typedef", "encoding", "annotations"]
+    "JSONDecodeResult",
+    ["messages_json", "typedef", "encoding", "annotations", "indent"],
 )
 
 
@@ -152,6 +158,7 @@ class JSONDecodeResult(_JSONDecodeResultBase):
         typedef: TypeDef object representing the inferred/provided schema.
         encoding: the outer encoding that was used ("none", "gzip", "grpc").
         annotations: dict of example values keyed by field path.
+        indent: the JSON indent the messages were serialized with.
     """
 
     @property
@@ -166,7 +173,7 @@ class JSONDecodeResult(_JSONDecodeResultBase):
             raise ValueError(
                 "JSONDecodeResult has multiple messages; use .messages_json directly"
             )
-        return json.dumps(parsed[0], indent=2)
+        return json.dumps(parsed[0], indent=self.indent)
 
 
 if six.PY3:
@@ -177,11 +184,6 @@ if six.PY3:
         from typing import Any, Dict, List, Tuple, Optional, ByteString, Union
         from blackboxprotobuf.lib.pytypes import Message, TypeDefDict, FieldDefDict
         from blackboxprotobuf.lib.config import Config
-
-
-# ---------------------------------------------------------------------------
-# Primary API: decode() / encode() / decode_to_json() / encode_from_json()
-# ---------------------------------------------------------------------------
 
 
 def decode(data, message_type=None, encoding="auto", config=None):
@@ -312,6 +314,11 @@ def encode(message, message_type, encoding="none", config=None):
         raise TypedefException("A typedef is required to encode non-empty messages")
 
     messages = message if isinstance(message, list) else [message]
+    if len(messages) > 1 and encoding != "grpc":
+        raise EncoderException(
+            "Cannot encode %d messages with encoding=%r; only 'grpc' supports multiple messages"
+            % (len(messages), encoding)
+        )
     encoded = [
         bytes(
             blackboxprotobuf.lib.types.length_delim.encode_message(msg, config, typedef)
@@ -319,7 +326,7 @@ def encode(message, message_type, encoding="none", config=None):
         for msg in messages
     ]
 
-    if len(encoded) == 1 and encoding != "grpc":
+    if encoding != "grpc":
         return payloads.encode_payload(encoded[0], encoding)
     return payloads.encode_payload(encoded, encoding)
 
@@ -360,6 +367,7 @@ def decode_to_json(data, message_type=None, encoding="auto", indent=2, config=No
         typedef=result.typedef,
         encoding=result.encoding,
         annotations=result.annotations,
+        indent=indent,
     )
 
 
@@ -389,6 +397,11 @@ def encode_from_json(json_str, message_type, encoding="none", config=None):
     if typedef.is_empty() and any(len(v) > 0 for v in values):
         raise TypedefException("A typedef is required to encode non-empty messages")
 
+    if len(values) > 1 and encoding != "grpc":
+        raise EncoderException(
+            "Cannot encode %d messages with encoding=%r; only 'grpc' supports multiple messages"
+            % (len(values), encoding)
+        )
     values = [_json_safe_transform(msg, typedef_dict, True) for msg in values]
     encoded = [
         bytes(
@@ -397,7 +410,7 @@ def encode_from_json(json_str, message_type, encoding="none", config=None):
         for msg in values
     ]
 
-    if len(encoded) == 1 and encoding != "grpc":
+    if encoding != "grpc":
         return payloads.encode_payload(encoded[0], encoding)
     return payloads.encode_payload(encoded, encoding)
 

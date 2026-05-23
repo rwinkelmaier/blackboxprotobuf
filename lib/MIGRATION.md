@@ -86,6 +86,11 @@ result = blackboxprotobuf.decode(data, encoding="auto")   # auto-detect (default
 messages = result.messages   # list; may have > 1 message for grpc
 ```
 
+Only `grpc` carries more than one message on the wire. Passing a list of more
+than one message to `encode`, `encode_from_json`, or `DecodeResult.re_encode`
+with `encoding="none"` or `"gzip"` raises an `EncoderException`. A single
+message (as a dict or a one-element list) is accepted by every encoding.
+
 ---
 
 ## DecodeResult attributes
@@ -107,6 +112,7 @@ messages = result.messages   # list; may have > 1 message for grpc
 |---|---|---|
 | `.messages_json` | `str` | JSON array string of all decoded messages |
 | `.message_json` | `str` | JSON object string for the single message (raises if `len > 1`) |
+| `.indent` | `int` | JSON indent the messages were serialized with |
 
 ---
 
@@ -149,7 +155,9 @@ The following were exported in v1 but are no longer public in v2:
 - `protobuf_to_json`, `protobuf_from_json`
 - `decode_wrapped_message`, `encode_wrapped_message`
 - `decode_grpc_message`, `encode_grpc_message`
-- `NAME_REGEX` (internal constant; never intended for external use)
+- `NAME_REGEX` (renamed to the private `_NAME_REGEX`; never intended for
+  external use). If you referenced `blackboxprotobuf.NAME_REGEX`, inline your
+  own copy of the pattern: `re.compile(r"\A[a-zA-Z][a-zA-Z0-9_]*\Z")`.
 - `MutableTypeDef`, `MutableFieldDef` (merged into `TypeDef`/`FieldDef`)
 - `Config.preserve_field_order` (removed; field_order is now always preserved
   in the TypeDef object when available)

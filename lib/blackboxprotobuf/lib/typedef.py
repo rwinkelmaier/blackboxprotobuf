@@ -70,10 +70,6 @@ class _ImmutableTypeDef(object):
         self._fields = {}  # type: Dict[str, _ImmutableFieldDef]
         self._field_names = {}  # type: Dict[str, str]  # name -> field_id
 
-    # ------------------------------------------------------------------ #
-    # Serialization (read side)
-    # ------------------------------------------------------------------ #
-
     def to_dict(self):
         # type: () -> Dict[str, Any]
         """Serialise to a plain dict.
@@ -85,10 +81,6 @@ class _ImmutableTypeDef(object):
             field_id: fielddef.to_dict() for field_id, fielddef in self._fields.items()
         }
 
-    # ------------------------------------------------------------------ #
-    # Key helpers
-    # ------------------------------------------------------------------ #
-
     def _normalize_key(self, key):
         # type: (object) -> str
         return six.ensure_text(str(key))
@@ -99,10 +91,6 @@ class _ImmutableTypeDef(object):
         s = self._normalize_key(key)
         base = s.split("-", 1)[0]
         return self._field_names.get(base, base)
-
-    # ------------------------------------------------------------------ #
-    # Read-only mapping interface
-    # ------------------------------------------------------------------ #
 
     def __getitem__(self, field_number):
         # type: (object) -> _ImmutableFieldDef
@@ -147,10 +135,6 @@ class _ImmutableTypeDef(object):
         # type: () -> bool
         return len(self._fields) == 0
 
-    # ------------------------------------------------------------------ #
-    # Internal: used by the decoder
-    # ------------------------------------------------------------------ #
-
     def make_mutable(self):
         # type: () -> _MutableInternalTypeDef
         """Return a shallow mutable copy for decoder use (copy-on-write).
@@ -180,13 +164,9 @@ class _ImmutableTypeDef(object):
         return None
 
 
-# ---------------------------------------------------------------------------
-# _MutableInternalTypeDef - decoder-internal mutable view.
-# Inherits all read methods from _ImmutableTypeDef (so indexing returns the
-# immutable FieldDef view), and adds the single write the decoder needs.
-# ---------------------------------------------------------------------------
-
-
+# Decoder-internal mutable view. Inherits all read methods from
+# _ImmutableTypeDef (so indexing returns the immutable FieldDef view), and adds
+# the single write the decoder needs.
 class _MutableInternalTypeDef(_ImmutableTypeDef):
     def set_fielddef(self, field_number, fielddef):
         # type: (str, _ImmutableFieldDef) -> None
@@ -196,17 +176,9 @@ class _MutableInternalTypeDef(_ImmutableTypeDef):
             self._field_names[fielddef._name] = field_id
 
 
-# ---------------------------------------------------------------------------
-# TypeDef - public user-facing type. Narrows reads to FieldDef and adds the
-# full mutator surface.
-# ---------------------------------------------------------------------------
-
-
+# Public user-facing type. Narrows reads to FieldDef and adds the full mutator
+# surface.
 class TypeDef(_MutableInternalTypeDef):
-    # ------------------------------------------------------------------ #
-    # Serialization (write side)
-    # ------------------------------------------------------------------ #
-
     @staticmethod
     def from_dict(typedef_dict):
         # type: (Dict[str, Any]) -> TypeDef
@@ -231,11 +203,8 @@ class TypeDef(_MutableInternalTypeDef):
                 typedef._field_names[fielddef._name] = field_id
         return typedef
 
-    # ------------------------------------------------------------------ #
-    # Read-side narrowing overrides: TypeDef hands out FieldDef, not the
-    # immutable view, so users can mutate via property setters / __setitem__.
-    # ------------------------------------------------------------------ #
-
+    # TypeDef hands out FieldDef, not the immutable view, so users can mutate
+    # via property setters / __setitem__.
     def __getitem__(self, field_number):
         # type: (object) -> FieldDef
         field_id = self._resolve_key(field_number)
@@ -272,10 +241,6 @@ class TypeDef(_MutableInternalTypeDef):
             return field_id, fd
         return None
 
-    # ------------------------------------------------------------------ #
-    # Mutable mapping interface
-    # ------------------------------------------------------------------ #
-
     def __setitem__(self, field_number, value):
         # type: (object, object) -> None
         """Assign a FieldDef to a field number.
@@ -311,10 +276,6 @@ class TypeDef(_MutableInternalTypeDef):
         fielddef = self._fields.pop(field_id)
         if fielddef._name:
             self._field_names.pop(fielddef._name, None)
-
-    # ------------------------------------------------------------------ #
-    # Convenience mutators (public API)
-    # ------------------------------------------------------------------ #
 
     def set_type(self, field_number, type_name):
         # type: (object, str) -> None
@@ -364,11 +325,7 @@ class TypeDef(_MutableInternalTypeDef):
         return new
 
 
-# ---------------------------------------------------------------------------
-# _ImmutableFieldDef - read-only base used as the decoder's input type.
-# ---------------------------------------------------------------------------
-
-
+# Read-only base used as the decoder's input type.
 class _ImmutableFieldDef(object):
     def __init__(self, field_id=""):
         # type: (str) -> None
@@ -380,10 +337,6 @@ class _ImmutableFieldDef(object):
         self._example_value = None  # type: Any
         self._seen_repeated = False  # type: bool
         self._field_order = None  # type: Optional[List[str]]
-
-    # ------------------------------------------------------------------ #
-    # Serialization (read side)
-    # ------------------------------------------------------------------ #
 
     def to_dict(self):
         # type: () -> Dict[str, Any]
@@ -421,10 +374,6 @@ class _ImmutableFieldDef(object):
             }
 
         return fielddef_dict
-
-    # ------------------------------------------------------------------ #
-    # Read-only properties
-    # ------------------------------------------------------------------ #
 
     @property
     def type(self):
@@ -464,10 +413,6 @@ class _ImmutableFieldDef(object):
         """Reference to a named typedef in config.known_types (alias: message_type_name)."""
         return self._message_type_name
 
-    # ------------------------------------------------------------------ #
-    # Read-only navigation (delegates to message_typedef)
-    # ------------------------------------------------------------------ #
-
     def __getitem__(self, field_number):
         # type: (object) -> _ImmutableFieldDef
         td = self.message_typedef
@@ -476,10 +421,6 @@ class _ImmutableFieldDef(object):
                 "Field %r is not a message type; cannot index into it" % self._field_id
             )
         return td[field_number]
-
-    # ------------------------------------------------------------------ #
-    # Internal: used by the decoder (all reads)
-    # ------------------------------------------------------------------ #
 
     def make_mutable(self):
         # type: () -> _MutableInternalFieldDef
@@ -559,13 +500,9 @@ class _ImmutableFieldDef(object):
         return None
 
 
-# ---------------------------------------------------------------------------
-# _MutableInternalFieldDef - decoder-internal writes only.
-# Inherits read-only navigation; adds the named writes the decoder needs.
-# Does NOT have property setters - those live on the public FieldDef subclass.
-# ---------------------------------------------------------------------------
-
-
+# Decoder-internal writes only. Inherits read-only navigation; adds the named
+# writes the decoder needs. Does NOT have property setters - those live on the
+# public FieldDef subclass.
 class _MutableInternalFieldDef(_ImmutableFieldDef):
     def set_field_order(self, field_order):
         # type: (List[str]) -> None
@@ -594,24 +531,18 @@ class _MutableInternalFieldDef(_ImmutableFieldDef):
         return alt_type_id
 
 
-# ---------------------------------------------------------------------------
-# FieldDef - public user-facing type. Adds property setters, __setitem__,
-# from_dict, and a __getitem__ override that returns FieldDef.
-# ---------------------------------------------------------------------------
-
-
+# Public user-facing type. Adds property setters, __setitem__, from_dict, and a
+# __getitem__ override that returns FieldDef.
 class FieldDef(_MutableInternalFieldDef):
-    # ------------------------------------------------------------------ #
-    # Serialization (write side)
-    # ------------------------------------------------------------------ #
-
     @staticmethod
     def from_dict(fielddef_dict, field_id=""):
         # type: (Dict[str, Any], str) -> FieldDef
         """Build a FieldDef from a dict.
 
-        Accepts the canonical dict format produced by to_dict (type, name,
-        message_typedef, message_type_name, alt_typedefs, seen_repeated).
+        Accepts both the canonical to_dict format and the inline sub-fields
+        format. Keys are partitioned on isdigit(): digit keys are sub-message
+        fields, non-digit keys are metadata (type, name, alts/alt_typedefs,
+        type_ref/message_type_name, repeated/seen_repeated).
 
         Legacy state fields (field_order, example_value_ignored) are silently
         ignored; field_order is internal decoder state, not persisted across
@@ -672,10 +603,6 @@ class FieldDef(_MutableInternalFieldDef):
         # field_order and example_value_ignored: silently ignored
 
         return fielddef
-
-    # ------------------------------------------------------------------ #
-    # Mutable properties (redeclared to add setters)
-    # ------------------------------------------------------------------ #
 
     @property
     def type(self):
@@ -747,10 +674,6 @@ class FieldDef(_MutableInternalFieldDef):
         # type: (Optional[str]) -> None
         self._message_type_name = value
 
-    # ------------------------------------------------------------------ #
-    # Mutable navigation
-    # ------------------------------------------------------------------ #
-
     def __getitem__(self, field_number):
         # type: (object) -> FieldDef
         td = self.message_typedef
@@ -769,16 +692,11 @@ class FieldDef(_MutableInternalFieldDef):
         td[field_number] = value
 
 
-# ---------------------------------------------------------------------------
-# Boundary conversion: _MutableInternalTypeDef (decoder result) -> TypeDef (public)
-#
-# Walks the decoder's output, allocating new public FieldDef/TypeDef objects.
-# Provides isolation from the caller's input typedef (deepcopy semantics) in
-# one pass; nested message TypeDefs are also re-allocated as public TypeDefs.
-# Runs once per decode() call at the api.py boundary.
-# ---------------------------------------------------------------------------
-
-
+# Boundary conversion: _MutableInternalTypeDef (decoder result) -> TypeDef
+# (public). Walks the decoder's output, allocating new public FieldDef/TypeDef
+# objects. Provides isolation from the caller's input typedef (deepcopy
+# semantics) in one pass; nested message TypeDefs are also re-allocated as
+# public TypeDefs. Runs once per decode() call at the api.py boundary.
 def _to_public_typedef(internal):
     # type: (_ImmutableTypeDef) -> TypeDef
     td = TypeDef()

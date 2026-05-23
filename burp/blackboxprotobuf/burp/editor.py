@@ -175,19 +175,22 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
                 return self._message_info.content()
 
     def _handle_protobuf(
-        self, message_info, protobuf_data, message_type_in, typedef_source
+        self, message_info, raw_data, message_type_in, typedef_source
     ):
         """
         Sets the protobuf message for the editor.
         """
         try:
-            result = decode_to_json(protobuf_data, message_type_in, encoding="none")
+            result = decode_to_json(raw_data, message_type_in)
             json_data = result.message_json
-            message_type = result.typedef.to_dict()
+            protobuf_datas, _ = payloads.decode_payload(raw_data, result.encoding)
+            protobuf_data = protobuf_datas[0]
 
-            self._last_good = LastGoodData(json_data, message_type, typedef_source)
+            self._last_good = LastGoodData(json_data, result.typedef, typedef_source)
             self._filtered_message_model.set_new_data(protobuf_data)
             self._text_editor.setText(json_data)  # UI access
+            self._payload_info.protobuf_data = protobuf_data
+            self._payload_info.encoding_alg = result.encoding
             success = True
         except Exception as exc:
             success = False
@@ -205,7 +208,7 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
             self._callbacks.printError(
                 "Error decoding protobuf with saved type, trying with empty type"
             )
-            self._handle_protobuf(message_info, protobuf_data, {}, None)
+            self._handle_protobuf(message_info, raw_data, {}, None)
         else:
             self._callbacks.printError("Error decoding protobuf with empty type")
             self._text_editor.setText("Error decoding protobuf")
@@ -255,32 +258,12 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
 
         def run():
             try:
-                decoders = payloads.find_decoders(payload_info.raw_data)
-                for decoder in decoders:
-                    try:
-                        protobuf_data, encoding_alg = decoder(payload_info.raw_data)
-                    except BlackboxProtobufException:
-                        continue
-
-                    try:
-                        self._handle_protobuf(
-                            message_info,
-                            protobuf_data,
-                            message_type,
-                            typedef_source,
-                        )
-
-                        # Payload successfully decoded, so we probably have the right wrapper for the payload
-                        self._payload_info.protobuf_data = protobuf_data
-                        self._payload_info.encoding_alg = encoding_alg
-
-                        return
-                    except BlackboxProtobufException:
-                        if encoding_alg == "none":
-                            # Reraise the exception to the parent context and halt decoding
-                            six.reraise(*sys.exc_info())
-                        continue
-
+                self._handle_protobuf(
+                    message_info,
+                    payload_info.raw_data,
+                    message_type,
+                    typedef_source,
+                )
             except Exception as ex:
                 # Catch all, otherwise it disappears
                 self._text_editor.setText("Error decoding protobuf")
@@ -529,9 +512,8 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
 
         result = decode_to_json(protobuf_data, typedef, encoding="none")
         new_json = result.message_json
-        new_typedef = result.typedef.to_dict()
 
-        self._last_good = LastGoodData(new_json, new_typedef, source)
+        self._last_good = LastGoodData(new_json, result.typedef, source)
 
         self._filtered_message_model.set_new_data(protobuf_data)
         self._text_editor.setText(str(new_json))
@@ -556,8 +538,8 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
 
         typedef = self._last_good.typedef
 
-        # Do a deep copy on the dictionary so we don't accidentally modify others
-        default_config.known_types[name] = copy.deepcopy(typedef)
+        # Convert to a dict; known_types stores typedefs in dict form.
+        default_config.known_types[name] = typedef.to_dict()
         self._last_good.source = name  # remember the source, typedef is still the same
 
         # update the list of messages. This should trickle down to known message model
@@ -575,7 +557,7 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         self._extension.saved_types.pop(self._message_info.message_hash, None)
 
     def open_typedef_window(self):
-        typedef = self._last_good.typedef
+        typedef = self._last_good.typedef.to_dict()
         source = self._last_good.source
         self._extension.open_typedef_editor(typedef, source, self.editType)
 

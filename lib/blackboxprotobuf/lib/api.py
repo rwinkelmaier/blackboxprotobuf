@@ -910,7 +910,13 @@ def sort_typedef(typedef):
     ):  # Sort by type number
         output_field_def = collections.OrderedDict()  # type: Any
         for key, value in sorted(
-            field_def.items(), key=lambda t: (TYPEDEF_KEY_ORDER.index(t[0]), t[1])
+            field_def.items(),
+            key=lambda t: (
+                TYPEDEF_KEY_ORDER.index(t[0])
+                if t[0] in TYPEDEF_KEY_ORDER
+                else len(TYPEDEF_KEY_ORDER),
+                t[1],
+            ),
         ):  # sort by special keys, then value
             if key == "message_typedef":
                 output_field_def[key] = sort_typedef(value)  # type: ignore[arg-type]

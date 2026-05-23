@@ -610,13 +610,12 @@ class FieldDef(_MutableInternalFieldDef):
         # type: (Dict[str, Any], str) -> FieldDef
         """Build a FieldDef from a dict.
 
-        Accepts both the legacy format and the new inline-sub-fields format.
-        Keys partitioned on isdigit(): digit keys are sub-message fields,
-        non-digit keys are metadata (type, name, alts/alt_typedefs,
-        type_ref/message_type_name, repeated/seen_repeated).
+        Accepts the canonical dict format produced by to_dict (type, name,
+        message_typedef, message_type_name, alt_typedefs, seen_repeated).
 
-        Legacy state fields (field_order, example_value_ignored) are silently ignored;
-        field_order is internal decoder state, not persisted across serialization.
+        Legacy state fields (field_order, example_value_ignored) are silently
+        ignored; field_order is internal decoder state, not persisted across
+        serialization.
         """
         fielddef = FieldDef(field_id)
 

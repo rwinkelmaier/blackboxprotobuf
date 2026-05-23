@@ -21,9 +21,12 @@
 import six
 import binascii
 import hypothesis.strategies as st
+import re
 import blackboxprotobuf
 from blackboxprotobuf.lib.types import varint
 from blackboxprotobuf.lib.types import type_maps
+
+NAME_REGEX = re.compile(r"\A[a-zA-Z][a-zA-Z0-9_]*\Z")
 
 from hypothesis import settings
 from hypothesis import database
@@ -59,7 +62,7 @@ def message_typedef_gen(draw, max_depth=3, anon=False, types=None, named_fields=
     # pre-generate names so we can be sure they're unique
     field_names = draw(
         st.lists(
-            st.from_regex(blackboxprotobuf.NAME_REGEX),
+            st.from_regex(NAME_REGEX),
             min_size=len(field_numbers),
             max_size=len(field_numbers),
             unique_by=lambda x: x.lower(),

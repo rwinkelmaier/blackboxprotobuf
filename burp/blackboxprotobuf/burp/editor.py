@@ -29,6 +29,7 @@ import burp
 import copy
 import struct
 import blackboxprotobuf
+from blackboxprotobuf import decode_to_json, encode_from_json
 from javax.swing import JSplitPane, JPanel, JButton, BoxLayout, JOptionPane
 from javax.swing import (
     Box,
@@ -132,8 +133,8 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         success = False
         try:
             json_data = self._text_editor.getText().tostring()
-            protobuf_data = blackboxprotobuf.protobuf_from_json(
-                json_data, self._last_good.typedef
+            protobuf_data = encode_from_json(
+                json_data, self._last_good.typedef, encoding="none"
             )
 
             success = True
@@ -145,8 +146,8 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
 
         if not success:
             try:
-                protobuf_data = blackboxprotobuf.protobuf_from_json(
-                    self._last_good.message, self._last_good.typedef
+                protobuf_data = encode_from_json(
+                    self._last_good.message, self._last_good.typedef, encoding="none"
                 )
 
                 # Put the error here so that we only have one error to the user if the above encoding doesn't work
@@ -174,19 +175,22 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
                 return self._message_info.content()
 
     def _handle_protobuf(
-        self, message_info, protobuf_data, message_type_in, typedef_source
+        self, message_info, raw_data, message_type_in, typedef_source
     ):
         """
         Sets the protobuf message for the editor.
         """
         try:
-            json_data, message_type = blackboxprotobuf.protobuf_to_json(
-                protobuf_data, message_type_in
-            )
+            result = decode_to_json(raw_data, message_type_in)
+            json_data = result.message_json
+            protobuf_datas, _ = payloads.decode_payload(raw_data, result.encoding)
+            protobuf_data = protobuf_datas[0]
 
-            self._last_good = LastGoodData(json_data, message_type, typedef_source)
+            self._last_good = LastGoodData(json_data, result.typedef, typedef_source)
             self._filtered_message_model.set_new_data(protobuf_data)
             self._text_editor.setText(json_data)  # UI access
+            self._payload_info.protobuf_data = protobuf_data
+            self._payload_info.encoding_alg = result.encoding
             success = True
         except Exception as exc:
             success = False
@@ -204,7 +208,7 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
             self._callbacks.printError(
                 "Error decoding protobuf with saved type, trying with empty type"
             )
-            self._handle_protobuf(message_info, protobuf_data, {}, None)
+            self._handle_protobuf(message_info, raw_data, {}, None)
         else:
             self._callbacks.printError("Error decoding protobuf with empty type")
             self._text_editor.setText("Error decoding protobuf")
@@ -254,32 +258,12 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
 
         def run():
             try:
-                decoders = payloads.find_decoders(payload_info.raw_data)
-                for decoder in decoders:
-                    try:
-                        protobuf_data, encoding_alg = decoder(payload_info.raw_data)
-                    except BlackboxProtobufException:
-                        continue
-
-                    try:
-                        self._handle_protobuf(
-                            message_info,
-                            protobuf_data,
-                            message_type,
-                            typedef_source,
-                        )
-
-                        # Payload successfully decoded, so we probably have the right wrapper for the payload
-                        self._payload_info.protobuf_data = protobuf_data
-                        self._payload_info.encoding_alg = encoding_alg
-
-                        return
-                    except BlackboxProtobufException:
-                        if encoding_alg == "none":
-                            # Reraise the exception to the parent context and halt decoding
-                            six.reraise(*sys.exc_info())
-                        continue
-
+                self._handle_protobuf(
+                    message_info,
+                    payload_info.raw_data,
+                    message_type,
+                    typedef_source,
+                )
             except Exception as ex:
                 # Catch all, otherwise it disappears
                 self._text_editor.setText("Error decoding protobuf")
@@ -408,7 +392,7 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         try:
             json_data = self._text_editor.getText().tostring()
             typedef = self._last_good.typedef
-            protobuf_data = blackboxprotobuf.protobuf_from_json(json_data, typedef)
+            protobuf_data = encode_from_json(json_data, typedef, encoding="none")
             # If it works, save the message
             # Don't need to save typeddef because we're using the one from lastgood
             self._last_good.message = json_data
@@ -523,14 +507,13 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         old_typedef = self._last_good.typedef
         json_data = self._text_editor.getText().tostring()
 
-        protobuf_data = blackboxprotobuf.protobuf_from_json(json_data, old_typedef)
+        protobuf_data = encode_from_json(json_data, old_typedef, encoding="none")
         self._payload_info.protobuf_data = protobuf_data
 
-        new_json, new_typedef = blackboxprotobuf.protobuf_to_json(
-            protobuf_data, typedef
-        )
+        result = decode_to_json(protobuf_data, typedef, encoding="none")
+        new_json = result.message_json
 
-        self._last_good = LastGoodData(new_json, new_typedef, source)
+        self._last_good = LastGoodData(new_json, result.typedef, source)
 
         self._filtered_message_model.set_new_data(protobuf_data)
         self._text_editor.setText(str(new_json))
@@ -555,8 +538,8 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
 
         typedef = self._last_good.typedef
 
-        # Do a deep copy on the dictionary so we don't accidentally modify others
-        default_config.known_types[name] = copy.deepcopy(typedef)
+        # Convert to a dict; known_types stores typedefs in dict form.
+        default_config.known_types[name] = typedef.to_dict()
         self._last_good.source = name  # remember the source, typedef is still the same
 
         # update the list of messages. This should trickle down to known message model
@@ -574,7 +557,7 @@ class ProtoBufEditorTab(burp.IMessageEditorTab):
         self._extension.saved_types.pop(self._message_info.message_hash, None)
 
     def open_typedef_window(self):
-        typedef = self._last_good.typedef
+        typedef = self._last_good.typedef.to_dict()
         source = self._last_good.source
         self._extension.open_typedef_editor(typedef, source, self.editType)
 
@@ -759,7 +742,7 @@ class FilteredMessageModel(ListModel, ListDataListener):
             return False
         typedef = default_config.known_types[typename]
         try:
-            _, _ = blackboxprotobuf.protobuf_to_json(self._data, typedef)
+            decode_to_json(self._data, typedef, encoding="none")
         except BlackboxProtobufException as exc:
             self._callbacks.printError(traceback.format_exc())
             self._rejected_types.add(typename)

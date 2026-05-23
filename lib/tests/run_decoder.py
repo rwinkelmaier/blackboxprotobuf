@@ -26,10 +26,8 @@ sys.path.insert(0, "../")
 
 import blackboxprotobuf as bbp
 
-typedef = {}
-
 # Take a protobuf binary from stdin and decode it to JSON
-protobuf = sys.stdin.read()
-json, typedef = bbp.protobuf_to_json(protobuf, typedef)
-print(json)
-print(typedef)
+protobuf = sys.stdin.buffer.read()
+result = bbp.decode_to_json(protobuf)
+print(result.message_json)
+print(result.typedef.to_dict())

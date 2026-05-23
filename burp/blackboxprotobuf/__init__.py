@@ -57,4 +57,21 @@ def fix_protobuf():
 fix_protobuf()
 
 # mirror what we do in lib so we can use blackboxprotobuf.<function>
-from blackboxprotobuf.lib.api import *
+from blackboxprotobuf.lib.api import (
+    decode,
+    encode,
+    decode_to_json,
+    encode_from_json,
+    TypeDef,
+    FieldDef,
+    DecodeResult,
+    JSONDecodeResult,
+    validate_typedef,
+    sort_typedef,
+    export_protofile,
+    import_protofile,
+    BlackboxProtobufException,
+    TypedefException,
+    EncoderException,
+    DecoderException,
+)

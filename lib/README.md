@@ -66,46 +66,38 @@ message functions, along with several convenience functions to make it easier
 to use blackboxprotobuf with a user interface, such as encoding/decoding
 directly to JSON and validating modified type definitions.
 
-### Decode 
-Decoding functions takes a protobuf bytestring, and optionally
-either a type definition or a known message name mapped to a type definition
-(in `blackboxprotobuf.known_messages`). If a type definition isn't provided, an
-empty message type is assumed and all types are derived from the protobuf
-binary.
+### Decode
+`decode()` takes a protobuf bytestring and returns a `DecodeResult`. You can
+optionally pass a type definition (as a `TypeDef` object, a dict, or a known
+message type name). If none is provided, all types are inferred from the binary.
 
-The decoder returns a tuple containing a dictionary with the decoded data and a
-dictionary containing the generated type definition. If the input type
-definition does not include types for all fields in the message, the output
-type definitions will include type guesses for those fields.
+The `encoding` parameter controls outer encoding: `"none"` (raw protobuf),
+`"gzip"`, `"grpc"`, or `"auto"` (detect automatically, the default).
 
-Example use:
 ```python
 import blackboxprotobuf
 import base64
 
 data = base64.b64decode('KglNb2RpZnkgTWU=')
-message,typedef = blackboxprotobuf.protobuf_to_json(data)
-print(message)
+result = blackboxprotobuf.decode(data, encoding="none")
+print(result.message)    # single decoded message dict
+print(result.typedef)    # TypeDef object describing the schema
 ```
 
 ### Encode
-The encoding functions takes a Python dictionary containing the data and a type
-definition. Unlike decoding, the type definition is required and will fail if
-any fields are not defined. Generally, the type definition should be the output
-from the decoding function or a modified version thereof.
+`encode()` takes a message dict (or list of dicts for gRPC) and a type
+definition, and returns bytes.
 
-Example use:
 ```python
 import blackboxprotobuf
 import base64
 
 data = base64.b64decode('KglNb2RpZnkgTWU=')
-message,typedef = blackboxprotobuf.decode_message(data)
+result = blackboxprotobuf.decode(data, encoding="none")
 
-message[5] = 'Modified Me'
-
-data = blackboxprotobuf.encode_message(message,typedef)
-print(data)
+result.messages[0]["5"] = "Modified Me"
+new_data = blackboxprotobuf.encode(result.messages, result.typedef, encoding="none")
+print(new_data)
 ```
 
 ### Type definition structure
@@ -127,22 +119,18 @@ will be ignored.
 
 ### JSON Encode/Decode
 
-The `protobuf_to_json` and `protobuf_from_json` functions are convenience
-functions for  encoding/decoding messages to JSON instead of a python
-dictionary. These functions are designed for user-facing input/output and will
-also automatically sort the output, try to encode bytestrings for better
-printing and annotate example values onto the type definition structure.
+`decode_to_json()` and `encode_from_json()` are convenience functions for
+encoding/decoding messages to JSON instead of a Python dictionary. They
+automatically sort the output, encode bytestrings for display, and collect
+example values in `result.annotations`.
 
 ### Export/import protofile
 
-The `export_protofile` and `import_protofile` will attempt to convert a
-protobuffer `.proto` file into the blackboxprotobuf type definition and vice
-versa. These functions provide a higher level interface to
-`blackboxprotobuf.lib.protofile` which only takes a filename. The protofile
-functions do not implement a full proper parser and may break on some types.
-One common case to be aware of is the "import" statements in ".proto" files,
-which are not supported. Any imported files must be manually imported with
-`import_protofile` and saved in `blackboxprotobuf.known_messages` first.
+`export_protofile` and `import_protofile` convert a `.proto` file to/from
+the blackboxprotobuf type definition format. These functions do not implement
+a full parser and may break on some types. In particular, `import` statements
+in `.proto` files are not supported — any imported files must be processed
+separately with `import_protofile` first.
 
 
 ### Validate Typedef
@@ -154,19 +142,9 @@ as changing a field to an incompatible type or duplicate field names.
 
 ### Output Helper Functions
 
-The `json_safe_transform` is a helper function to help create more readable
-JSON output of bytes. It will encode/decode bytes types as `latin1` based on
-the type in the type definition.
-
-The `sort_output` is a helper function which sorts the output message based on
-the field numbers from the typedef. This helps makes the JSON output more
-consistent and predictable.
-
-The `sort_typedef` function sorts the fields of the typedef in order to make
-the output more readable. The message fields are sorted by their number and
-type fields (eg. name, type, inner message typedef) are sorted to prioritize
-important short fields at the top and especially to keep the name and type
-fields from getting buried underneath a long inner typedef.
+`sort_typedef(typedef)` sorts the fields of a typedef dict for more readable
+output. Fields are sorted by field number; within each field, metadata keys
+(name, type) appear before long nested content.
 
 ### Config
 
@@ -191,9 +169,8 @@ At the moment this includes:
   integers for all varints, set `default_types[WIRETYPE_VARINT] =
   'uint'`.
 
-The `api` functions like `blackboxprotobuf.decode_message` will default to
-using the global `blackboxprotobuf.lib.config.default` object if one is not
-specified.
+All API functions default to using the global `blackboxprotobuf.lib.config.default`
+object if no `config=` is specified.
 
 ## Type Breakdown
 The following is a quick breakdown of wire types and default values. See

@@ -25,4 +25,21 @@ which provides a high level interface for the module and convenience functions.
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .api import *
+from .api import (
+    decode,
+    encode,
+    decode_to_json,
+    encode_from_json,
+    TypeDef,
+    FieldDef,
+    DecodeResult,
+    JSONDecodeResult,
+    validate_typedef,
+    sort_typedef,
+    export_protofile,
+    import_protofile,
+    BlackboxProtobufException,
+    TypedefException,
+    EncoderException,
+    DecoderException,
+)

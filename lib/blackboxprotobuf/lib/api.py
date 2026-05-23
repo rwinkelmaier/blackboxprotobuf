@@ -51,229 +51,185 @@ from blackboxprotobuf.lib.exceptions import (
     EncoderException,
     DecoderException,
 )
-from blackboxprotobuf.lib.typedef import TypeDef
+from blackboxprotobuf.lib.typedef import (
+    _ImmutableTypeDef,
+    TypeDef,
+    FieldDef,
+    _to_public_typedef,
+)
 from blackboxprotobuf.lib import payloads
+
+__all__ = [
+    # Primary API (v2)
+    "decode",
+    "encode",
+    "decode_to_json",
+    "encode_from_json",
+    "TypeDef",
+    "FieldDef",
+    "DecodeResult",
+    "JSONDecodeResult",
+    "validate_typedef",
+    "sort_typedef",
+    "export_protofile",
+    "import_protofile",
+    # Exceptions
+    "BlackboxProtobufException",
+    "TypedefException",
+    "EncoderException",
+    "DecoderException",
+]
+
+_DecodeResultBase = collections.namedtuple(  # type: ignore[name-match]
+    "DecodeResult", ["messages", "typedef", "encoding", "annotations"]
+)
+
+
+class DecodeResult(_DecodeResultBase):
+    """Result of a decode operation.
+
+    Attributes:
+        messages: list of decoded message dicts (length 1 for none/gzip,
+            may be > 1 for grpc).
+        typedef: TypeDef object representing the inferred/provided schema.
+        encoding: the outer encoding that was used ("none", "gzip", "grpc").
+        annotations: dict of example values keyed by field path, extracted
+            from the first decoded message. Previously embedded in the typedef
+            as `example_value_ignored`.
+    """
+
+    @property
+    def message(self):
+        # type: () -> object
+        """Return the single decoded message. Raises ValueError if > 1 message."""
+        if len(self.messages) != 1:
+            raise ValueError(
+                "DecodeResult has %d messages; use .messages to access them"
+                % len(self.messages)
+            )
+        return self.messages[0]
+
+    def re_encode(self, encoding=None, config=None):
+        # type: (Optional[str], Optional[Config]) -> bytes
+        """Re-encode the decoded messages using the embedded typedef.
+
+        Args:
+            encoding: output encoding override. Defaults to the encoding used
+                during decode (self.encoding).
+            config: optional Config override.
+        Returns:
+            Encoded bytes with the given outer encoding applied.
+        """
+        if config is None:
+            from blackboxprotobuf.lib.config import default as default_config
+
+            config = default_config
+        out_encoding = encoding if encoding is not None else self.encoding
+        if len(self.messages) > 1 and out_encoding != "grpc":
+            raise EncoderException(
+                "Cannot encode %d messages with encoding=%r; only 'grpc' supports multiple messages"
+                % (len(self.messages), out_encoding)
+            )
+        encoded = [
+            bytes(
+                blackboxprotobuf.lib.types.length_delim.encode_message(
+                    msg, config, self.typedef
+                )
+            )
+            for msg in self.messages
+        ]
+        if out_encoding != "grpc":
+            return payloads.encode_payload(encoded[0], out_encoding)
+        return payloads.encode_payload(encoded, out_encoding)
+
+
+_JSONDecodeResultBase = collections.namedtuple(  # type: ignore[name-match]
+    "JSONDecodeResult",
+    ["messages_json", "typedef", "encoding", "annotations", "indent"],
+)
+
+
+class JSONDecodeResult(_JSONDecodeResultBase):
+    """Result of a JSON-decode operation (decode_to_json).
+
+    Attributes:
+        messages_json: JSON string representing the messages. Always a JSON
+            array (even for single messages) for consistency.
+        typedef: TypeDef object representing the inferred/provided schema.
+        encoding: the outer encoding that was used ("none", "gzip", "grpc").
+        annotations: dict of example values keyed by field path.
+        indent: the JSON indent the messages were serialized with.
+    """
+
+    @property
+    def message_json(self):
+        # type: () -> str
+        """Return the single message as a JSON object string (not array).
+
+        Raises ValueError if there is more than one message.
+        """
+        parsed = json.loads(self.messages_json)
+        if not isinstance(parsed, list) or len(parsed) != 1:
+            raise ValueError(
+                "JSONDecodeResult has multiple messages; use .messages_json directly"
+            )
+        return json.dumps(parsed[0], indent=self.indent)
+
 
 if six.PY3:
     import typing
 
     # Circular imports on Config if we don't check here
     if typing.TYPE_CHECKING:
-        from typing import Dict, List, Tuple, Optional, ByteString
+        from typing import Any, Dict, List, Tuple, Optional, ByteString, Union
         from blackboxprotobuf.lib.pytypes import Message, TypeDefDict, FieldDefDict
         from blackboxprotobuf.lib.config import Config
 
 
-def decode_message(buf, message_type=None, config=None):
-    # type: (bytes, Optional[str | TypeDefDict | TypeDef], Optional[Config]) -> tuple[Message, TypeDefDict]
-    """Decode a protobuf message and return a python dictionary representing
-    the message.
+def decode(data, message_type=None, encoding="auto", config=None):
+    # type: (bytes, Optional[Union[str, Dict[str, Any], TypeDef]], str, Optional[Config]) -> DecodeResult
+    """Decode a protobuf message payload, returning a DecodeResult.
+
+    This is the primary entry point for decoding. It replaces the older
+    decode_message / decode_wrapped_message pair by accepting an explicit
+    encoding parameter.
 
     Args:
-        buf: Bytes representing an encoded protobuf message
-        message_type: Optional type to use as the base for decoding. Allows for
-            customizing field types or names. Can be a python dictionary or a
-            message type name which maps to the `known_types` dictionary in the
-            config. Defaults to an empty definition '{}'.
-        config: `blackboxprotobuf.lib.config.Config` object which allows
-            customizing default types for wire types and holds the
-            `known_types` array. Defaults to
-            `blackboxprotobuf.lib.config.default` if not provided.
+        data: bytes containing the (optionally wrapped) protobuf payload.
+        message_type: Optional typedef hint - a TypeDef, a dict in typedef
+            format, a known-type name string, or None to auto-detect.
+        encoding: Outer wrapping to strip before decoding the protobuf bytes.
+            "auto" (default) - try each algorithm in order.
+            "none"           - raw protobuf bytes.
+            "gzip"           - gzip-compressed single message.
+            "grpc"           - gRPC framing (may contain multiple messages).
+        config: Optional Config object. Defaults to the global default.
     Returns:
-        A tuple containing a python dictionary representing the message and a
-        type definition for re-encoding the message.
-
-        The type definition is based on the `message_type` argument if one was
-        provided, but may add additional fields if new fields were encountered
-        during decoding.
+        DecodeResult with .messages (list), .typedef (TypeDef), .encoding,
+        and .annotations.
     """
-
     if config is None:
         config = default_config
 
-    if isinstance(buf, bytearray):
-        buf = bytes(buf)
-    buf = six.ensure_binary(buf)
+    if isinstance(data, bytearray):
+        data = bytes(data)
+    data = six.ensure_binary(data)
 
     typedef = _resolve_typedef(message_type, config)
-    value, typedef, _, _ = blackboxprotobuf.lib.types.length_delim.decode_message(
-        buf, config, typedef
-    )
-    return value, typedef.to_dict()
+    resolve_encoding = encoding if encoding != "auto" else None
 
-
-def encode_message(value, message_type, config=None):
-    # type: (Message, str | TypeDefDict | TypeDef, Optional[Config]) -> bytes
-    """Re-encode a python dictionary as a binary protobuf message.
-
-    Args:
-        value: Python dictionary to re-encode to bytes. This should usually be
-            a modified version of the dictionary returned by `decode_message`.
-        message_type: Type definition to use to re-encode the message. This
-            will should generally be the type definition returned from the
-            original `decode_message` call.
-        config: `blackboxprotobuf.lib.config.Config` object which allows
-            customizing default types for wire types and holds the
-            `known_types` array. Defaults to
-            `blackboxprotobuf.lib.config.default` if not provided.
-    Returns:
-        A bytearray containing the encoded protobuf message.
-    """
-
-    if config is None:
-        config = default_config
-
-    typedef = _resolve_typedef(message_type, config)
-    if typedef.is_empty() and len(value) > 0:
-        raise TypedefException("A typedef is required to encoded non-empty messages")
-    return bytes(
-        blackboxprotobuf.lib.types.length_delim.encode_message(value, config, typedef)
-    )
-
-
-def protobuf_to_json(buf, message_type=None, config=None):
-    # type: (bytes | list[bytes], Optional[str | TypeDefDict | TypeDef], Optional[Config]) -> tuple[str, TypeDefDict]
-    """Decode one or more protobuf messages and return a JSON string
-    representing the messages.
-
-    Args:
-        buf: One or more byte strings representing encoded protobuf messages
-        message_type: Optional type to use as the base for decoding. Allows for
-            customizing field types or names. Can be a python dictionary or a
-            message type name which maps to the `known_types` dictionary in the
-            config. Defaults to an empty definition '{}'.
-        config: `blackboxprotobuf.lib.config.Config` object which allows
-            customizing default types for wire types and holds the
-            `known_types` array. Defaults to
-            `blackboxprotobuf.lib.config.default` if not provided.
-    Returns:
-        A tuple containing a JSON string representing the messages and a type
-        definition for re-encoding the messages.
-
-        The JSON string and type definition are annotated and sorted for
-        readability.
-
-        The type definition is based on the `message_type` argument if one was
-        provided, but may add additional fields if new fields were encountered
-        during decoding.
-    """
-    if config is None:
-        config = default_config
-    values = []
-    bufs = buf if isinstance(buf, list) else [buf]
-
-    if len(bufs) == 0:
-        raise DecoderException("No protobuf bytes were provided")
-
-    typedef_dict = _resolve_typedef(message_type, config).to_dict()
-
-    for data in bufs:
-        value, typedef_dict = decode_message(data, typedef_dict, config)
-        value = _json_safe_transform(value, typedef_dict, False, config=config)
-        value = _sort_output(value, typedef_dict, config=config)
-        values.append(value)
-
-    _annotate_typedef(typedef_dict, values[0])
-    typedef_dict = sort_typedef(typedef_dict)
-
-    if not isinstance(buf, list) and len(values) == 1:
-        return json.dumps(values[0], indent=2), typedef_dict
-    else:
-        return json.dumps(values, indent=2), typedef_dict
-
-
-def protobuf_from_json(json_str, message_type, config=None):
-    # type: (str, str | TypeDefDict | TypeDef, Optional[Config]) -> bytes | list[bytes]
-    """Re-encode a JSON string as a binary protobuf message.
-
-    Args:
-        json_str: JSON string to re-encode to protobuf message bytes. This
-            should usually be a modified version of the value returned by
-            `protobuf_to_json`.
-        message_type: Type definition to use to re-encode the message. This
-            will should generally be the type definition returned from the
-            original `protobuf_to_json` call.
-        config: `blackboxprotobuf.lib.config.Config` object which allows
-            customizing default types for wire types and holds the
-            `known_types` array. Defaults to
-            `blackboxprotobuf.lib.config.default` if not provided.
-    Returns:
-        A bytearray containing the encoded protobuf message.
-    """
-    if config is None:
-        config = default_config
-
-    typedef = _resolve_typedef(message_type, config)
-
-    value = json.loads(json_str)
-    values = value if isinstance(value, list) else [value]
-    if typedef.is_empty() and any([len(value) > 0 for value in values]):
-        raise TypedefException("A typedef is required to encoded non-empty messages")
-
-    typedef_dict = typedef.to_dict()
-    values = [_json_safe_transform(message, typedef_dict, True) for message in values]
-
-    payloads = []
-    for message in values:
-        payloads.append(encode_message(message, typedef, config))
-
-    if not isinstance(value, list) and len(payloads) == 1:
-        return payloads[0]
-    else:
-        return payloads
-
-
-def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
-    # type: (bytes, Optional[str | TypeDefDict | TypeDef], Optional[str], Optional[Config]) -> tuple[List[Message], TypeDefDict, str]
-    """Decode a protobuf message which may be wrapped in an additional encoding, such as gRPC or gzip.
-    Args:
-        value: byte buffer containing the raw protobuf payload
-        message_type: Optional type definition used as the base for decoding,
-            which allows field types to be customized. If `buf` contains
-            multiple messages, the same typedef will be used for all messages.
-        encoding: The outer encoding around the protobuf payload. Valid values are:
-            - None: encoder will be guessed through trial and error. Specifying
-                    an encoding should always be preferred when possible.
-            - 'none' - No extra encoding, same will be treated as raw protobuf
-            - 'gzip' - Single protobuf message compressed with gzip
-            - 'grpc' - One or more protobuf messages with a gRPC header.
-                       Compressed gRPC is not supported. Once compression
-                       support is added, it will likely be a variation of
-                       `grpc`, such as `grpc-gzip`.
-        config: Optional `blackboxprotobuf.lib.config.Config` object which can
-                change default decoding behaviors
-    Returns:
-        A tuple containing:
-            - List of decoded protobuf messages. This list will contain only
-                  a single element for `none` and `gzip` encodings, but `grpc`
-                  may product multiple messages.
-            - Type definition for re-encoding the messages
-            - name of the encoding algorithm that was used
-    """
-    if config is None:
-        config = default_config
-
-    if isinstance(buf, bytearray):
-        buf = bytes(buf)
-
-    buf = six.ensure_binary(buf)
-    typedef = _resolve_typedef(message_type, config)
-
-    if encoding is None:
-        decoders = payloads.find_decoders(buf)
+    if resolve_encoding is None:
+        decoders = payloads.find_decoders(data)
+        detected_encoding = None
         for decoder in decoders:
             try:
-                protobuf_datas, encoding = decoder(buf)
+                protobuf_datas, detected_encoding = decoder(data)
             except BlackboxProtobufException:
-                # Error while decoding wrapper, skip to next alg
                 continue
             try:
                 values = []
-                # Don't override typedef
-                decoder_typedef = typedef
+                decoder_typedef = typedef  # type: _ImmutableTypeDef
                 for protobuf_data in protobuf_datas:
-                    # If there are multiple messages, we assume they have the same
-                    # message type and reuse the typedef
                     (
                         value,
                         decoder_typedef,
@@ -283,11 +239,16 @@ def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
                         protobuf_data, config, decoder_typedef
                     )
                     values.append(value)
-                return values, decoder_typedef.to_dict(), encoding
+                public_typedef = _to_public_typedef(decoder_typedef)
+                annotations = _collect_annotations(public_typedef.to_dict(), values[0])
+                return DecodeResult(
+                    messages=values,
+                    typedef=public_typedef,
+                    encoding=detected_encoding,
+                    annotations=annotations,
+                )
             except BlackboxProtobufException as exc:
-                # If we hit an error decoding, we have to assume we have the
-                # wrong payload wrapper unless we are already using 'none'
-                if encoding == "none":
+                if detected_encoding == "none":
                     six.raise_from(
                         DecoderException(
                             "Unable to decode protobuf message with any encoding algorithm"
@@ -295,172 +256,202 @@ def decode_wrapped_message(buf, message_type=None, encoding=None, config=None):
                         exc,
                     )
                 continue
-        # Should not hit this due to the raise on "none" encoding alg
         raise DecoderException(
             "Unable to decode protobuf message with any encoding algorithm"
         )
     else:
-        protobuf_datas, encoding = payloads.decode_payload(buf, encoding)
+        protobuf_datas, detected_encoding = payloads.decode_payload(
+            data, resolve_encoding
+        )
         values = []
+        decoder_typedef = typedef
         for protobuf_data in protobuf_datas:
-            # If there are multiple messages, we assume they have the same
-            # message type and reuse the typedef
             (
                 value,
-                typedef,
+                decoder_typedef,
                 _,
                 _,
             ) = blackboxprotobuf.lib.types.length_delim.decode_message(
-                protobuf_data, config, typedef
+                protobuf_data, config, decoder_typedef
             )
             values.append(value)
+        public_typedef = _to_public_typedef(decoder_typedef)
+        annotations = _collect_annotations(public_typedef.to_dict(), values[0])
+        return DecodeResult(
+            messages=values,
+            typedef=public_typedef,
+            encoding=detected_encoding,
+            annotations=annotations,
+        )
 
-        return values, typedef.to_dict(), encoding
 
+def encode(message, message_type, encoding="none", config=None):
+    # type: (object, Union[str, Dict[str, Any], TypeDef], str, Optional[Config]) -> bytes
+    """Encode one or more message dicts as a protobuf payload.
 
-def encode_wrapped_message(messages, message_type, encoding, config=None):
-    # type: (List[Message], str | TypeDefDict, str, Optional[Config]) -> bytes
-    """This function re-encodes one or more messages using the provided
-    typedef and outer encoding algorithm, such as grpc or gzip.
+    This is the primary entry point for encoding. It replaces the older
+    encode_message / encode_wrapped_message pair.
 
     Args:
-        messages - List with one or more decoded protobuf messages.
-        message_type - Type definition for re-encoding the message. Should
-          generatlly be the type definition returned by a decoding function.
-        encoding - String representing the outer encoding algorithm. This
-          should generally be the value returned by `decode_wrapped_message`.
-          Valid values are:
-            - 'none' - Raw protobuf message, no outer encoding
-            - 'gzip' - gzip compressed message
-            - 'grpc' - One or more protobuf messages encoded with a gRPC
-                       header. gRPC compression is not currently supported.
-
+        message: A single message dict, or a list of message dicts (for grpc).
+        message_type: TypeDef, dict typedef, or known-type name string.
+        encoding: Outer wrapping to apply after encoding.
+            "none" (default) - raw protobuf bytes.
+            "gzip"           - gzip-compressed single message.
+            "grpc"           - gRPC framing.
+        config: Optional Config object. Defaults to the global default.
     Returns:
-        A bytearray containing the encoded protobuf message.
+        Encoded bytes with the outer encoding applied.
     """
     if config is None:
         config = default_config
 
     typedef = _resolve_typedef(message_type, config)
-    if typedef.is_empty() and any([len(message) > 0 for message in messages]):
-        raise TypedefException("A typedef is requiredto encode non-empty messages")
+    if typedef.is_empty() and (
+        (isinstance(message, list) and any(len(m) > 0 for m in message))
+        or (isinstance(message, dict) and len(message) > 0)
+    ):
+        raise TypedefException("A typedef is required to encode non-empty messages")
 
-    values = []
-
-    for message in messages:
-        value = blackboxprotobuf.lib.types.length_delim.encode_message(
-            message, config, typedef
+    messages = message if isinstance(message, list) else [message]
+    if len(messages) > 1 and encoding != "grpc":
+        raise EncoderException(
+            "Cannot encode %d messages with encoding=%r; only 'grpc' supports multiple messages"
+            % (len(messages), encoding)
         )
-        values.append(bytes(value))
-    wrapped_payload = payloads.encode_payload(values, encoding)
-    return wrapped_payload
+    encoded = [
+        bytes(
+            blackboxprotobuf.lib.types.length_delim.encode_message(msg, config, typedef)
+        )
+        for msg in messages
+    ]
+
+    if encoding != "grpc":
+        return payloads.encode_payload(encoded[0], encoding)
+    return payloads.encode_payload(encoded, encoding)
 
 
-def wrapped_protobuf_to_json(buf, message_type=None, encoding=None, config=None):
-    # type: (ByteString, Optional[str | TypeDefDict | TypeDef], Optional[str], Optional[Config]) -> Tuple[str, TypeDefDict, str]
-    """Decode a protobuf message, which may be encoded with gRPC or gzip, and
-    return a JSON string representing the messages.
+def decode_to_json(data, message_type=None, encoding="auto", indent=2, config=None):
+    # type: (bytes, Optional[Union[str, Dict[str, Any], TypeDef]], str, int, Optional[Config]) -> JSONDecodeResult
+    """Decode a protobuf payload and return a JSON string.
+
+    Thin wrapper around decode() that applies _json_safe_transform and
+    _sort_output so bytes fields are represented as latin1 strings and fields
+    are sorted by field number for readability.
 
     Args:
-        buf: A bytestring representing an encoded protobuf message
-        message_type: Optional type to use as the base for decoding. Allows for
-            customizing field types or names. Can be a python dictionary or a
-            message type name which maps to the `known_types` dictionary in the
-            config. Defaults to an empty definition '{}'.
-        encoding: A string identifying the encoding type. If not provided, or
-            set to `None`, the encoding will be guessed through trial and
-            error. Valid values are:
-                - "gRPC" - gRPC header. Can decode to multiple messages
-                - "gzip" - gzip encoding
-                - "none" - no encoding
-        config: `blackboxprotobuf.lib.config.Config` object which allows
-            customizing default types for wire types and holds the
-            `known_types` array. Defaults to
-            `blackboxprotobuf.lib.config.default` if not provided.
+        data: bytes containing the (optionally wrapped) protobuf payload.
+        message_type: Optional typedef hint. See decode() for details.
+        encoding: Outer encoding ("auto", "none", "gzip", "grpc").
+        indent: JSON indentation level (default 2). Pass None for compact.
+        config: Optional Config object.
     Returns:
-        A tuple containing a JSON string representing the messages, a type
-        definition for re-encoding the messages and the wrapper encoding.
-
-        The JSON string and type definition are annotated and sorted for
-        readability.
-
-        The type definition is based on the `message_type` argument if one was
-        provided, but may add additional fields if new fields were encountered
-        during decoding.
+        JSONDecodeResult with .messages_json (always a JSON array), .typedef,
+        .encoding, and .annotations. Use .message_json for the single-message
+        JSON object string.
     """
     if config is None:
         config = default_config
 
-    if isinstance(buf, bytearray):
-        buf = bytes(buf)
+    result = decode(data, message_type, encoding=encoding, config=config)
+    typedef_dict = result.typedef.to_dict()
 
-    if encoding is None:
-        decoders = payloads.find_decoders(buf)
-        for decoder in decoders:
-            try:
-                protobuf_datas, encoding = decoder(buf)
-            except BlackboxProtobufException:
-                # Error while decoding wrapper, skip to next alg
-                continue
-            try:
-                message, typedef = protobuf_to_json(
-                    protobuf_datas, message_type, config
+    json_messages = []
+    for msg in result.messages:
+        msg = _json_safe_transform(msg, typedef_dict, False, config=config)
+        msg = _sort_output(msg, typedef_dict, config=config)
+        json_messages.append(msg)
+
+    return JSONDecodeResult(
+        messages_json=json.dumps(json_messages, indent=indent),
+        typedef=result.typedef,
+        encoding=result.encoding,
+        annotations=result.annotations,
+        indent=indent,
+    )
+
+
+def encode_from_json(json_str, message_type, encoding="none", config=None):
+    # type: (str, Union[str, Dict[str, Any], TypeDef], str, Optional[Config]) -> bytes
+    """Re-encode a JSON string as a protobuf payload.
+
+    Accepts the JSON string produced by decode_to_json (or any compatible
+    format). The JSON may be a single message object or an array of messages.
+
+    Args:
+        json_str: JSON string to re-encode. May be an object or array.
+        message_type: TypeDef, dict typedef, or known-type name string.
+        encoding: Outer encoding to apply ("none", "gzip", "grpc").
+        config: Optional Config object.
+    Returns:
+        Encoded bytes with the outer encoding applied.
+    """
+    if config is None:
+        config = default_config
+
+    typedef = _resolve_typedef(message_type, config)
+    typedef_dict = typedef.to_dict()
+
+    value = json.loads(json_str)
+    values = value if isinstance(value, list) else [value]
+    if typedef.is_empty() and any(len(v) > 0 for v in values):
+        raise TypedefException("A typedef is required to encode non-empty messages")
+
+    if len(values) > 1 and encoding != "grpc":
+        raise EncoderException(
+            "Cannot encode %d messages with encoding=%r; only 'grpc' supports multiple messages"
+            % (len(values), encoding)
+        )
+    values = [_json_safe_transform(msg, typedef_dict, True) for msg in values]
+    encoded = [
+        bytes(
+            blackboxprotobuf.lib.types.length_delim.encode_message(msg, config, typedef)
+        )
+        for msg in values
+    ]
+
+    if encoding != "grpc":
+        return payloads.encode_payload(encoded[0], encoding)
+    return payloads.encode_payload(encoded, encoding)
+
+
+def _collect_annotations(typedef_dict, message):
+    # type: (Dict[str, Any], Any) -> Dict[str, Any]
+    """Collect example values from the first decoded message, keyed by field path.
+
+    This replaces the old _annotate_typedef approach of embedding example
+    values directly in the typedef dict. The annotations are now returned
+    as a separate dict from decode().
+    """
+    annotations = {}  # type: Dict[str, Any]
+    _collect_annotations_recursive(typedef_dict, message, annotations, [])
+    return annotations
+
+
+def _collect_annotations_recursive(typedef_dict, message, annotations, path):
+    # type: (Dict[str, Any], Any, Dict[str, Any], List[str]) -> None
+    for field_number, field_def in typedef_dict.items():
+        field_name = field_def.get("name", "") or field_number
+        if field_name not in message:
+            field_name = field_number
+        if field_name not in message:
+            continue
+        field_value = message[field_name]
+        current_path = path + [field_name]
+        if field_def.get("type") == "message" and "message_typedef" in field_def:
+            sub_typedef = field_def["message_typedef"]
+            if isinstance(field_value, list):
+                for item in field_value:
+                    if isinstance(item, dict):
+                        _collect_annotations_recursive(
+                            sub_typedef, item, annotations, current_path
+                        )
+            elif isinstance(field_value, dict):
+                _collect_annotations_recursive(
+                    sub_typedef, field_value, annotations, current_path
                 )
-                return message, typedef, encoding
-            except BlackboxProtobufException as exc:
-                # If we hit an error decoding, we have to assume we have the
-                # wrong payload wrapper unless we are already using 'none'
-                if encoding == "none":
-                    six.raise_from(
-                        DecoderException(
-                            "Unable to decode protobuf message with any encoding algorithm"
-                        ),
-                        exc,
-                    )
-                continue
-        # Should not hit this due to the raise on "none" encoding alg
-        raise DecoderException(
-            "Unable to decode protobuf message with any encoding algorithm"
-        )
-    else:
-        protobuf_datas, encoding = payloads.decode_payload(buf, encoding)
-        message, typedef = protobuf_to_json(protobuf_datas, message_type, config)
-
-        return message, typedef, encoding
-
-
-def wrapped_protobuf_from_json(json_str, message_type, encoding, config=None):
-    # type: (str, str | TypeDefDict | TypeDef, str, Optional[Config]) -> bytes
-    """Re-encode a JSON string as a binary protobuf message with optional
-    additional encoding, such as gRPC or gzip.
-
-    Args:
-        json_str: JSON string to re-encode to protobuf message bytes. This
-            should usually be a modified version of the value returned by
-            `protobuf_to_json`.
-        message_type: Type definition to use to re-encode the message. This
-            will should generally be the type definition returned from the
-            original `protobuf_to_json` call.
-        encoding: "Outer" encoding mechanisms for protobuf payload. The
-            encoding returned by `wrapped_protobuf_to_json` should generally be
-            used here.
-            Valid algorithms are:
-            - "gRPC" - gRPC header with length. Can encode multiple messages
-            - "gzip"
-            - "none"
-        config: `blackboxprotobuf.lib.config.Config` object which allows
-            customizing default types for wire types and holds the
-            `known_types` array. Defaults to
-            `blackboxprotobuf.lib.config.default` if not provided.
-    Returns:
-        A bytearray containing the encoded protobuf message.
-    """
-    if config is None:
-        config = default_config
-
-    values = protobuf_from_json(json_str, message_type, config)
-    wrapped_payload = payloads.encode_payload(values, encoding)
-    return wrapped_payload
+        else:
+            annotations[".".join(current_path)] = field_value
 
 
 def export_protofile(message_types, output_filename):
@@ -514,7 +505,7 @@ def import_protofile(input_filename, save_to_known=True, config=None):
         return new_typedefs
 
 
-NAME_REGEX = re.compile(r"\A[a-zA-Z][a-zA-Z0-9_]*\Z")
+_NAME_REGEX = re.compile(r"\A[a-zA-Z][a-zA-Z0-9_]*\Z")
 
 
 def validate_typedef(typedef, old_typedef=None, config=None, _path=None):
@@ -584,11 +575,9 @@ def validate_typedef(typedef, old_typedef=None, config=None, _path=None):
         valid_type_fields = [
             "type",
             "name",
-            "field_order",
             "message_typedef",
             "message_type_name",
             "alt_typedefs",
-            "example_value_ignored",
             "seen_repeated",
         ]
         for key, value in field_typedef.items():
@@ -636,7 +625,7 @@ def validate_typedef(typedef, old_typedef=None, config=None, _path=None):
                         % (value, field_number),
                         field_path,
                     )
-                if not NAME_REGEX.match(value):
+                if not _NAME_REGEX.match(value):
                     raise TypedefException(
                         (
                             'Invalid field name "%s" for field '
@@ -923,25 +912,29 @@ def sort_typedef(typedef):
         "name",
         "type",
         "message_type_name",
-        "example_value_ignored",
-        "field_order",
         "seen_repeated",
         "message_typedef",
         "alt_typedefs",
     ]
-    output_dict = collections.OrderedDict()
+    output_dict = collections.OrderedDict()  # type: Any
 
     for field_number, field_def in sorted(
         typedef.items(), key=lambda t: int(t[0])
     ):  # Sort by type number
-        output_field_def = collections.OrderedDict()
+        output_field_def = collections.OrderedDict()  # type: Any
         for key, value in sorted(
-            field_def.items(), key=lambda t: (TYPEDEF_KEY_ORDER.index(t[0]), t[1])
+            field_def.items(),
+            key=lambda t: (
+                TYPEDEF_KEY_ORDER.index(t[0])
+                if t[0] in TYPEDEF_KEY_ORDER
+                else len(TYPEDEF_KEY_ORDER),
+                t[1],
+            ),
         ):  # sort by special keys, then value
             if key == "message_typedef":
-                output_field_def[key] = sort_typedef(value)  # type: ignore
+                output_field_def[key] = sort_typedef(value)  # type: ignore[arg-type]
             else:
-                output_field_def[key] = value  # type: ignore
+                output_field_def[key] = value
 
         output_dict[field_number] = output_field_def
     if six.PY3 and typing.TYPE_CHECKING:
@@ -949,45 +942,6 @@ def sort_typedef(typedef):
             TypeDefDict, output_dict
         )  # Cast because typing doesn't like the ordered dict
     return output_dict
-
-
-def _annotate_typedef(typedef, message):
-    # type: (TypeDefDict, Message) -> None
-    # Add values from message into the typedef so it's easier to figure out
-    # which field when you're editing manually
-
-    for field_number, field_def in typedef.items():
-        field_value = None
-        field_name = six.ensure_text(str(field_number))
-        if field_name not in message and field_def.get("name", "") != "":
-            field_name = field_def["name"]
-
-        if field_name in message:
-            field_value = message[field_name]
-
-            if field_def["type"] == "message":
-                if isinstance(field_value, list):
-                    for value in field_value:
-                        _annotate_typedef(field_def["message_typedef"], value)
-                else:
-                    _annotate_typedef(field_def["message_typedef"], field_value)
-            else:
-                field_def["example_value_ignored"] = field_value
-
-        # Add a blank name field if the field doesn't have one, so it's easier
-        # to add
-        if "name" not in field_def:
-            field_def["name"] = six.u("")
-
-
-def _strip_typedef_annotations(typedef):
-    # type: (TypeDefDict) -> None
-    # Remove example values placed by _annotate_typedef
-    for _, field_def in typedef.items():
-        if "example_value_ignored" in field_def:
-            del field_def["example_value_ignored"]
-        if "message_typedef" in field_def:
-            _strip_typedef_annotations(field_def["message_typedef"])
 
 
 def _resolve_typedef(message_type, config):

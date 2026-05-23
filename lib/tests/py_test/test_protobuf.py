@@ -77,7 +77,9 @@ def test_decode(x):
     for key, value in x.items():
         setattr(message, key, value)
     encoded = message.SerializeToString()
-    decoded, typedef = blackboxprotobuf.decode_message(encoded, testMessage_typedef)
+    result = blackboxprotobuf.decode(encoded, testMessage_typedef, encoding="none")
+    decoded = result.message
+    typedef = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef)
     for key in decoded.keys():
         assert x[key] == decoded[key]
@@ -86,7 +88,7 @@ def test_decode(x):
 # Test encoding with blackboxprotobuf
 @given(x=strategies.gen_message_data(testMessage_typedef))
 def test_encode(x):
-    encoded = blackboxprotobuf.encode_message(x, testMessage_typedef)
+    encoded = blackboxprotobuf.encode(x, testMessage_typedef, encoding="none")
     message = Test_pb2.TestMessage()
     message.ParseFromString(encoded)
 
@@ -106,7 +108,9 @@ def test_modify(x, modify_num):
     for key, value in x.items():
         setattr(message, key, value)
     encoded = message.SerializeToString()
-    decoded, typedef = blackboxprotobuf.decode_message(encoded, testMessage_typedef)
+    result = blackboxprotobuf.decode(encoded, testMessage_typedef, encoding="none")
+    decoded = result.message
+    typedef = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef)
 
     # eliminate any cases where protobuf defaults out a field
@@ -126,7 +130,7 @@ def test_modify(x, modify_num):
     decoded[modify_key] = mod_func(decoded[modify_key])
     x[modify_key] = mod_func(x[modify_key])
 
-    encoded = blackboxprotobuf.encode_message(decoded, testMessage_typedef)
+    encoded = blackboxprotobuf.encode(decoded, testMessage_typedef, encoding="none")
     message = Test_pb2.TestMessage()
     message.ParseFromString(encoded)
 
@@ -147,9 +151,11 @@ def test_decode_json(x):
         setattr(message, key, value)
     encoded = message.SerializeToString()
 
-    decoded_json, typedef_json = blackboxprotobuf.protobuf_to_json(
-        encoded, testMessage_typedef
+    result = blackboxprotobuf.decode_to_json(
+        encoded, testMessage_typedef, encoding="none"
     )
+    decoded_json = result.message_json
+    typedef_json = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef_json)
     decoded = json.loads(decoded_json)
     for key in decoded.keys():
@@ -166,10 +172,14 @@ def test_encode_json(x):
         x["testBytes"] = x["testBytes"].decode("latin1")
     json_str = json.dumps(x)
 
-    encoded = blackboxprotobuf.protobuf_from_json(json_str, testMessage_typedef)
-    assert not isinstance(encoded, list)
+    encoded = blackboxprotobuf.encode_from_json(
+        json_str, testMessage_typedef, encoding="none"
+    )
+    assert isinstance(encoded, bytes)
 
-    test_decode, _ = blackboxprotobuf.decode_message(encoded, testMessage_typedef)
+    test_decode = blackboxprotobuf.decode(
+        encoded, testMessage_typedef, encoding="none"
+    ).message
 
     message = Test_pb2.TestMessage()
     message.ParseFromString(encoded)
@@ -190,9 +200,11 @@ def test_modify_json(x, modify_num):
     for key, value in x.items():
         setattr(message, key, value)
     encoded = message.SerializeToString()
-    decoded_json, typedef = blackboxprotobuf.protobuf_to_json(
-        encoded, testMessage_typedef
+    result = blackboxprotobuf.decode_to_json(
+        encoded, testMessage_typedef, encoding="none"
     )
+    decoded_json = result.message_json
+    typedef = result.typedef.to_dict()
     blackboxprotobuf.validate_typedef(typedef)
     decoded = json.loads(decoded_json)
 
@@ -213,10 +225,10 @@ def test_modify_json(x, modify_num):
     decoded[modify_key] = mod_func(decoded[modify_key])
     x[modify_key] = mod_func(x[modify_key])
 
-    encoded = blackboxprotobuf.protobuf_from_json(
-        json.dumps(decoded), testMessage_typedef
+    encoded = blackboxprotobuf.encode_from_json(
+        json.dumps(decoded), testMessage_typedef, encoding="none"
     )
-    assert not isinstance(encoded, list)
+    assert isinstance(encoded, bytes)
     message = Test_pb2.TestMessage()
     message.ParseFromString(encoded)
 

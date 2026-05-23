@@ -30,6 +30,9 @@ pytest-profiling = "^1.8.1"
 [tool.poetry.scripts]
 bbpb = "blackboxprotobuf.__main__:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests/py_test"]
+
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
